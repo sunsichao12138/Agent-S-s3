@@ -2,20 +2,12 @@
 
 ## Purpose
 
-This repo is `Agent-S` secondary development for a Feishu desktop GUI agent.
-
-Current baseline:
-
-- `launcher.py` is the product shell
-- `gui_agents/s3/` is the generic GUI kernel
-- `sop_executor.py` and `sops/` are the lightweight scripted path
-
-Feishu capability should be added as a domain layer, not by continuously polluting `gui_agents/s3/`.
-Current mainline is `Windows + 飞书桌面端 + GUI-first`, not Feishu CLI, bot, or open-platform-first integration.
+本仓库是基于 `Agent-S` 的飞书桌面端 GUI Agent 二次开发。
+当前主线路线是 `Windows + 飞书桌面端 + GUI-first`，不是飞书开放平台 CLI、bot 或 API-first。
 
 ## Source Of Truth
 
-Read in this order before changing architecture or module boundaries:
+涉及需求、架构、模块边界时，按下面顺序阅读：
 
 1. `docs/项目需求.md`
 2. `docs/feishu_gui_agent_master_plan.md`
@@ -24,78 +16,108 @@ Read in this order before changing architecture or module boundaries:
 5. `docs/interfaces/feishu_gui_agent_interfaces.md`
 6. `CONTRIBUTE.md`
 
-## Collaboration Rules
+## Core Rules
 
-1. Use multiple coding agents only when module ownership is clear and write scopes are disjoint.
-2. Every module change must follow `analysis -> manual plan -> coding -> review`.
-3. Do not code before the manual plan is understood by both the model and the human.
-4. If an interface changes, update `docs/interfaces/` before or together with implementation.
-5. After coding, run minimal verification first; use a different agent for review when practical.
-6. Do not assume Feishu open-platform capability exists unless the task explicitly targets that mode.
-7. Prefer separate git worktrees for `main` and active feature branches when parallel work is ongoing.
+1. 任何模块改动都走 `analysis -> manual plan -> coding -> review`。
+2. 人和模型都理解手动 plan 之前，不进入 coding。
+3. 共享契约变更时，文档必须与实现同 PR 或更早落地。
+4. Feishu 业务逻辑优先落在 `gui_agents/feishu/`，不要持续污染 `gui_agents/s3/`。
+5. 高耦合文件串行开发，低耦合模块才并行开发。
+6. 默认假设飞书开放平台能力不可用，除非任务明确要求。
+
+## Contract Freeze Gate
+
+并行 coding 的启动条件不是“别人代码写完了”，而是“共享契约冻结了”。
+
+冻结至少包含：
+
+- `docs/spec/`
+- `docs/interfaces/`
+- track 拆分与依赖关系
+- 当前 milestone scope
+
+冻结记录至少包含：
+
+- freeze commit SHA
+- freeze 日期
+- owner
+- reviewer
+
+冻结后如果共享契约还要改，按 `freeze-v2` 处理：
+
+1. 暂停受影响 track 的相关文件开发。
+2. 先更新 spec/interfaces。
+3. 重新 review。
+4. 再恢复 coding。
 
 ## Ownership Boundaries
 
-Prefer parallel work in these areas:
+默认并行轨道：
 
-- `gui_agents/feishu/testcases/`
-- `gui_agents/feishu/planner/`
-- `gui_agents/feishu/pages/`
-- `gui_agents/feishu/detectors/`
-- `gui_agents/feishu/locators/`
-- `gui_agents/feishu/workflows/`
-- `gui_agents/feishu/verifiers/`
-- `gui_agents/feishu/reports/`
-- `gui_agents/feishu/maintenance/`
+- `Track A`: `gui_agents/feishu/testcases/` -> `gui_agents/feishu/planner/`
+- `Track B`: `gui_agents/feishu/pages/` -> `gui_agents/feishu/detectors/` -> `gui_agents/feishu/locators/`
+- `Track C`: `gui_agents/feishu/workflows/` -> `gui_agents/feishu/verifiers/`
+- `Track D`: `gui_agents/feishu/reports/` -> `gui_agents/feishu/maintenance/`
+- `Serial Track`: `gui_agents/feishu/agents/feishu_worker.py` 以及 `s3` 高耦合集成文件
 
-Default parallel rollout:
+默认顺序：
 
-- first wave: `testcases/planner` + `pages/detectors/locators` + `workflows/verifiers`
-- second wave: `reports/maintenance`
-- final serial integration: `feishu_worker` and `s3` high-coupling files
+1. 第一波并行 `Track A + Track B + Track C`
+2. `Track D` 在运行时事实模型稳定后接入
+3. `Serial Track` 最后做总装
 
-Treat these as high-coupling and change them serially:
+## High-Coupling Files
+
+以下文件默认串行开发，并且需要集成级 review：
 
 - `gui_agents/s3/agents/worker.py`
 - `gui_agents/s3/agents/grounding.py`
 - `gui_agents/s3/cli_app.py`
 - `gui_agents/s3/memory/procedural_memory.py`
-- future `gui_agents/feishu/agents/feishu_worker.py`
-
-## Architecture Constraints
-
-1. Keep `s3` as the generic GUI kernel.
-2. Add Feishu logic under `gui_agents/feishu/`.
-3. Prefer explicit `TestCase -> Planner -> Workflow -> Verifier -> Report` contracts.
-4. Do not use unconstrained free-form agent execution as the main path.
-5. Do not treat memory as the primary solution; stabilize actions, state detection, locators, verifier gates, and fallback first.
-6. Any future API adapter must remain optional and isolated from the GUI-first path.
+- `gui_agents/feishu/agents/feishu_worker.py`
 
 ## Planning Standard
 
-Before coding any module, write a short manual plan with:
+每个模块开工前都要有短 plan，至少包含：
 
-- target files and ownership
-- interface changes
-- direct dependencies
-- verification path
-- risk or rollback notes
+- target files
+- owner
+- depends on
+- outputs
+- verification
+- risks / rollback
 
-If the change touches a high-coupling module, finish plan review before any edit.
+## Worktree Rules
 
-## Branch And Worktree
+1. 默认分支当前是 `master`，它是集成基线，不是日常功能开发分支。
+2. `master` worktree 保持干净，只做同步、冻结、集成检查。
+3. 一个 worktree 只对应一个活跃分支。
+4. 一个分支只在一个 worktree 中主动开发。
+5. 开新 worktree 前先看 `git worktree list`。
+6. 合并完成后及时 `git worktree remove` 清理废弃 worktree。
+7. 需要临时联调或修补时，新开 `review/<topic>` 或 `fix/<topic>`，不要直接在 `master` worktree 改。
+8. 如果旧分支和当前默认分支没有共同祖先，不要直接 `rebase`，改为从当前默认分支新切分支后手动移植改动。
 
-1. Keep `main` as the integration branch, not the active feature workspace.
-2. Do feature work on dedicated branches and dedicated worktrees.
-3. Sync by updating `main` first, then rebasing feature branches onto `main`.
-4. Do not develop the same branch from multiple worktrees at the same time.
+## Merge And Review Rules
+
+1. 先冻结契约，再切并行分支。
+2. A/B/C 从同一个 freeze SHA 切出。
+3. track 分支合并前先同步默认分支，再 rebase 到最新基线。
+4. rebase 改到了已 review 的冲突区域，必须重新 review。
+5. `Serial Track` 从 A/B/C/D 合入后的新基线切出，并最后合并。
+
+Review 分三层：
+
+- Gate 1 Self-check: plan、最小验证、证据齐全
+- Gate 2 Module review: 看边界、契约、失败路径
+- Gate 3 Integration review: 高耦合文件或多 track 合流必过
 
 ## Delivery Standard
 
-Each completed module should include:
+每个完成模块都应交付：
 
-- explicit module boundary
-- success criteria or verifier
-- fallback or failure handling
-- minimal regression evidence
-- short review summary with risks and follow-ups
+- 明确边界
+- 成功判定或 verifier
+- fallback / failure handling
+- 最小回归证据
+- 简短 review 结论与剩余风险

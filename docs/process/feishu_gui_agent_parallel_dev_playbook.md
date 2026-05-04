@@ -1,352 +1,296 @@
-# 飞书 GUI Agent 并行开发执行规范
+# 飞书 GUI Agent 并行开发 Playbook
 
-## 1. 目的
-
-本文档回答一个问题：在多人和多 coding agent 协作下，如何把飞书 GUI Agent 做成“模块解耦、可并行实现、可 review、可回归”的工程。
+本文件是并行开发的操作手册。架构边界看 `master_plan`，提交规范看 `CONTRIBUTE.md`，这里专门回答“怎么并行做、什么时候停、怎么合流”。
 
 相关文档：
 
-- [文档索引](../README.md)
 - [主方案](../feishu_gui_agent_master_plan.md)
+- [PRD](../product/feishu_gui_agent_prd.md)
 - [Technical Spec](../spec/feishu_gui_agent_technical_spec.md)
 - [Interface Doc](../interfaces/feishu_gui_agent_interfaces.md)
 - [CONTRIBUTE.md](../../CONTRIBUTE.md)
 
-## 2. 并行开发前提
+## 1. 一句话口径
 
-只有同时满足以下条件，才允许并行 coding：
+Track 之间并行，Track 内部串行；契约先冻结，总装最后做。
 
-1. 模块边界已经写入 `Technical Spec`
-2. 输入输出契约已经写入 `Interface Doc`
-3. 写入范围互不重叠
-4. 已经完成模块级手动 plan
+## 2. 并行前置条件
 
-缺一项都不要并行。
+只有同时满足下面条件，才允许并行 coding：
 
-## 2.1 契约冻结与并行 Coding 的关系
+1. 模块边界已经写入 `spec`
+2. 输入输出契约已经写入 `interfaces`
+3. 当前 milestone scope 已固定
+4. 每个模块已有手动 plan
 
-并行 coding 的前提不是“别人代码已经写完”，而是“共享契约已经冻结”。
+缺一项，都不要开并行 coding。
 
-明确规则：
+## 3. Contract Freeze Gate
 
-1. 先在主分支完成共享契约冻结
-2. 再启动各个 track 的并行 coding
-3. 各个 track 在实现阶段只依赖已冻结的契约结构，不依赖其他 track 的实现代码
+### 3.1 冻结目标
 
-这意味着：
+最少冻结这些内容：
 
-- `Track A` 可以先按 `TestCase` 和 `WorkflowPlan` 契约实现
-- `Track B` 可以先按 `FeishuState`、`PageDescriptor`、`LocatorResult` 契约实现
-- `Track C` 可以先按 `WorkflowPlan`、`FeishuACI` 方法签名、`Verifier` 契约实现
+- `TestCase`
+- `WorkflowPlan`
+- `FeishuState`
+- `PageDescriptor`
+- `LocatorResult`
+- `ActionLog`
+- `StepResult`
+- `RuntimeContext`
+- 当前 track map
+- 当前 milestone scope
+
+### 3.2 冻结记录
+
+冻结记录最少包含：
+
+- freeze SHA
+- freeze 日期
+- owner
+- reviewer
+- 受影响 tracks
+
+建议把这段记录写到冻结 PR 描述中。
+
+### 3.3 并行启动条件
+
+当且仅当共享契约冻结后，`Track A + Track B + Track C` 才能同时开始 coding。原因是它们依赖的是契约结构，不是其他 track 的实现代码。
 
 特别说明：
 
-- `Track C` 依赖 `planner/` 和 `agents/` 的是“契约”，不是它们的实现代码
-- 因此只要 `interfaces` 和 `spec` 已冻结，`Track A + Track B + Track C` 就可以同时开始 coding
-- `Serial Track` 之所以最后做，是因为它承担总装集成，而不是因为前置契约不足
+- `Track C` 依赖 `planner/` 和 `agents/` 的是契约，不是实现
+- `Track D` 依赖运行时事实模型，因此默认第二波再接
+- `Serial Track` 最后做，是因为它负责总装，不是因为契约不足
 
-## 3. 角色分工
+### 3.4 Freeze Reopen
 
-- `Planner`：选择 workflow，绑定业务参数，保留前置条件和进入执行前断言。
-- `Workflow`：定义运行时阶段推进、fallback、retry。
-- `FeishuWorker`：串联模块，不承载业务规则。
-- `Verifier`：输出标准化步骤级和用例级结果。
-- `ReportBuilder`：只消费 `RuntimeContext`，不消费 `Worker` 私有状态。
+冻结后如果还要改共享契约，按 `freeze-v2` 处理：
 
-## 4. 推荐拆分方式
+1. 标记变更源和受影响 track
+2. 暂停受影响文件上的 coding
+3. 先更新 `spec` 与 `interfaces`
+4. 重新 review
+5. 生成新的 freeze SHA
+6. 相关分支 rebase 到新基线后再继续
 
-这里不是“四选一”。
+## 4. Track 拆分与交接门禁
 
-默认方案是：
+### 4.1 Track Map
 
-- `Track A / B / C / D` 可以同时推进
-- `Serial Track` 必须在上游契约冻结后再接入
+| Track | 模块 | Consumes | Produces | Start Gate | Done Gate | Blocks |
+| --- | --- | --- | --- | --- | --- | --- |
+| A | `testcases/`, `planner/` | 项目需求、PRD | `TestCase`, `WorkflowPlan` | freeze 完成 | 结构、样例、失败输出固定 | C, Serial |
+| B | `pages/`, `detectors/`, `locators/` | 页面知识、视觉事实 | `PageDescriptor`, `FeishuState`, `LocatorResult` | freeze 完成 | 页面、状态、定位返回固定 | C, D, Serial |
+| C | `workflows/`, `verifiers/` | `WorkflowPlan`, `FeishuACI`, `FeishuState` | workflow 阶段机、`StepResult` | A/B 契约冻结 | stage、retry、failure_type 固定 | D, Serial |
+| D | `reports/`, `maintenance/` | `RuntimeContext`, `ActionLog`, `StepResult` | `summary.json`, `report.md`, artifact 约定 | 运行时事实模型冻结 | 报告与产物结构固定 | Serial |
+| Serial | `feishu_worker` + `s3` 高耦合文件 | A/B/C/D 稳定实现 | 端到端集成链路 | A/B/C 完成最小验证 | 从 plan 到 runtime context 全链路可跑 | 最终发布 |
 
-也就是说，推荐拆分方式不是给出多个可选套餐，而是给出一套默认并行分工。
+### 4.2 Track A
 
-执行约束：
-
-1. 每个 track 同一时刻只允许一个 owner 负责同一文件
-2. 不同 track 可以同时 coding
-3. 若某个 track 需要改共享契约，先暂停相关 track，先改文档再继续
-4. `Serial Track` 不参与第一波并行 coding
-
-推荐默认编组：
-
-- 1 人 / 1 agent：只做 `Track A`
-- 2 人 / 2 agents：并行 `Track A + Track B`
-- 3 人 / 3 agents：并行 `Track A + Track B + Track C`
-- 4 人及以上：并行 `Track A + Track B + Track C + Track D`
-
-当前项目建议默认采用：
-
-1. 第一阶段并行 `Track A + Track B + Track C`
-2. `Track D` 在 `RuntimeContext` 契约冻结后接入
-3. `Serial Track` 最后接入
-
-### Track A
-
-- `gui_agents/feishu/testcases/`
-- `gui_agents/feishu/planner/`
-
-目标：把自然语言稳定收敛为 `workflow + workflow_params + preconditions`
-
-Track 内部顺序：
+内部顺序：
 
 1. `testcases/`
 2. `planner/`
 
-说明：
+handoff gate：
 
-- `planner/` 依赖 `testcases/` 的输入模型
-- Track A 内部默认串行，不建议同时实现这两个子目录
+- `testcases/` done：schema、preconditions、assertions、正反例齐全
+- `planner/` start：`TestCase` 已冻结
+- `planner/` done：`WorkflowPlan`、workflow 选路、params、preconditions 透传、失败原因已固定
 
-### Track B
+### 4.3 Track B
 
-- `gui_agents/feishu/pages/`
-- `gui_agents/feishu/detectors/`
-- `gui_agents/feishu/locators/`
-
-目标：稳定产出 `FeishuState` 和 `LocatorResult`
-
-Track 内部顺序：
+内部顺序：
 
 1. `pages/`
 2. `detectors/`
 3. `locators/`
 
-说明：
+handoff gate：
 
-- `detectors/` 依赖页面描述与关键区域元数据
-- `locators/` 依赖 `FeishuState` 与 `PageDescriptor`
-- Track B 对外可并行于其他 track，但内部按此顺序推进
+- `pages/` done：`page_id`、anchor、detector 消费字段已固定
+- `detectors/` start：`PageDescriptor` 已冻结
+- `detectors/` done：`FeishuState` 公共字段和扩展策略已固定
+- `locators/` start：`FeishuState`、`PageDescriptor` 已冻结
+- `locators/` done：成功返回、失败返回、`bbox` 格式、`page_id` 失败语义已固定
 
-### Track C
+### 4.4 Track C
 
-- `gui_agents/feishu/workflows/`
-- `gui_agents/feishu/verifiers/`
-
-目标：按单 workflow 落地阶段机和步骤级验证
-
-Track 内部顺序：
+内部顺序：
 
 1. `workflows/`
 2. `verifiers/`
 
-说明：
+handoff gate：
 
-- `workflows/` 依赖 `WorkflowPlan` 和 `FeishuACI` 契约
-- `verifiers/` 依赖 `workflows/` 的阶段定义以及 `detectors/` 的状态契约
-- Track C 内部也不是全并行，建议先固定 workflow，再补 verifier
+- `workflows/` start：`WorkflowPlan`、`FeishuACI` 已冻结
+- `workflows/` done：stage、retry、fallback、阶段输出已固定
+- `verifiers/` start：workflow stage 和 detector 输出已冻结
+- `verifiers/` done：`StepResult`、`failure_type`、断言失败语义已固定
 
-### Track D
+### 4.5 Track D
 
-- `gui_agents/feishu/reports/`
-- `gui_agents/feishu/maintenance/`
-
-目标：沉淀 `RuntimeContext` 产物、截图、报告和维护能力
-
-Track 内部顺序：
+内部顺序：
 
 1. `reports/`
 2. `maintenance/`
 
-说明：
+handoff gate：
 
-- `reports/` 先围绕 `RuntimeContext`、`ActionLog`、`StepResult` 落地
-- `maintenance/` 在页面和截图产物稳定后再补
+- `reports/` start：`RuntimeContext`、`ActionLog`、`StepResult` 已冻结
+- `reports/` done：`summary.json`、`report.md`、artifact path 已固定
+- `maintenance/` start：报告和产物结构稳定
 
-### Serial Track
+### 4.6 Serial Track
 
-- `gui_agents/feishu/agents/feishu_worker.py`
-- `gui_agents/s3/agents/worker.py`
-- `gui_agents/s3/agents/grounding.py`
+只在最后启动。
 
-目标：只在上游契约冻结后接入
+start gate：
 
-说明：
+- A/B/C 已完成模块级最小验证
+- D 如被依赖，则对应契约已稳定
+- 高耦合文件 owner 已明确
 
-- `Serial Track` 不与第一波 track 同时写集成逻辑
-- 它的输入是 A/B/C/D 已冻结并经过最小验证的模块契约与实现
+done gate：
 
-## 4.1 为什么这样拆
+- 端到端链路能从 `WorkflowPlan` 跑到 `RuntimeContext`
+- 关键失败路径能落到统一 `failure_type`
 
-- `Track A` 负责把自然语言收敛成可执行计划，是其他模块的输入基线
-- `Track B` 负责页面与定位事实，是执行链最核心的环境感知层
-- `Track C` 负责把业务场景落成阶段机，是 workflow 级能力主战场
-- `Track D` 负责报告与维护，依赖前面三条链路产出稳定事实模型
-- `Serial Track` 是高耦合总装层，不适合作为第一波并行开发对象
+## 5. Dependency Pause Matrix
 
-## 5. 每个模块的手动 Plan 模板
-
-每次 coding 前，plan 至少包含：
-
-1. 目标文件
-2. 依赖的上游契约
-3. 本模块输出给谁消费
-4. 最小验证方式
-5. 风险和不做项
-
-推荐格式：
-
-```text
-Module:
-Owner:
-Files:
-Depends on:
-Outputs:
-Verification:
-Out of Scope:
-Risks:
-```
-
-## 6. 联调顺序
-
-1. `Parser -> Planner`
-2. `Pages/Detector -> Locator`
-3. `Workflow -> Verifier`
-4. `Worker -> RuntimeContext`
-5. `ReportBuilder`
-
-不要一开始就让 `Worker` 直接串所有模块。
-
-## 6.1 Git Worktree 协作
-
-推荐每个主要分支使用独立 worktree，避免来回 checkout 干扰本地开发。
-
-worktree 与 track 的关系：
-
-1. 共享契约冻结在主分支 worktree 完成
-2. 每个 track 在独立 worktree 中 coding
-3. `Serial Track` 在最后单独开 worktree 做总装集成
-
-推荐基础流程：
-
-```text
-主分支冻结契约
-  -> 为 Track A / B / C / D 分别创建独立分支与 worktree
-  -> 各 track 在各自 worktree 中 coding
-  -> 完成最小验证后合回集成分支
-  -> Serial Track 独立 worktree 做总装联调
-```
-
-示例：
-
-```bash
-git fetch origin
-git worktree add ../agent-s-main main
-git worktree add ../agent-s-feat feat/your-branch
-```
-
-推荐目录角色：
-
-- `../agent-s-main`：只用于同步和查看最新 `main`
-- `../agent-s-feat`：只用于当前 feature 开发
-
-若需要多人或多 agent 并行，可继续增加：
-
-```bash
-git worktree add ../agent-s-track-a feat/track-a
-git worktree add ../agent-s-track-b feat/track-b
-git worktree add ../agent-s-track-c feat/track-c
-git worktree add ../agent-s-track-d feat/track-d
-git worktree add ../agent-s-serial feat/serial-integration
-```
-
-推荐映射：
-
-- `../agent-s-track-a` 对应 `Track A`
-- `../agent-s-track-b` 对应 `Track B`
-- `../agent-s-track-c` 对应 `Track C`
-- `../agent-s-track-d` 对应 `Track D`
-- `../agent-s-serial` 对应 `Serial Track`
-
-推荐起点：
-
-```bash
-git checkout main
-git pull --rebase origin main
-
-git checkout -b feat/track-a
-git checkout -b feat/track-b
-git checkout -b feat/track-c
-git checkout -b feat/track-d
-git checkout -b feat/serial-integration
-```
-
-更稳妥的做法是：
-
-1. 先在主分支合入契约冻结文档
-2. 再从同一个 base commit 切出 `feat/track-a`、`feat/track-b`、`feat/track-c`
-3. `feat/track-d` 在 `RuntimeContext` 稳定后再切
-4. `feat/serial-integration` 最后再切
-
-约定：
-
-1. 一个 worktree 只对应一个分支
-2. 一个分支只在一个 worktree 中进行主动开发
-3. 不要在 `main` worktree 直接写功能代码
-4. 所有 track 分支都应从同一个“契约已冻结”的 base commit 切出
-
-## 6.2 Main 同步节奏
-
-推荐节奏：
-
-1. 在 `main` worktree 执行 `git pull --rebase origin main`
-2. 切到各自 feature 分支所在 worktree
-3. 执行 `git rebase main`
-4. 解决冲突后继续开发
-
-推荐命令：
-
-```bash
-cd ../agent-s-main
-git pull --rebase origin main
-
-cd ../agent-s-feat
-git rebase main
-```
+| 变更源 | 影响 | 停止范围 |
+| --- | --- | --- |
+| `TestCase` / `WorkflowPlan` | C, Serial | 暂停消费 plan 的文件 |
+| `PageDescriptor` / `FeishuState` | B 下游, C, D, Serial | 暂停消费页面与状态结构的文件 |
+| workflow stage / verifier 结果 | D, Serial | 暂停报告和集成相关文件 |
+| `RuntimeContext` | D, Serial | 暂停所有运行时产物消费者 |
 
 规则：
 
-- rebase 前先 `git status`
-- 本地未提交改动先 `commit` 或 `stash`
-- rebase 后若分支已推远端，使用 `git push --force-with-lease`
+1. 只暂停受影响文件，不做全仓停工。
+2. 受影响范围由契约 owner 判断。
+3. 判断不清时按“受影响”处理。
 
-## 7. 合并门禁
+## 6. 推荐并行顺序
 
-以下任一条件不满足，不合并：
-
-1. 跨模块契约变更未同步更新文档
-2. 没有最小验证样例
-3. 同时修改高耦合文件和多个上游契约
-4. `review` 不能说明失败归因如何进入 `failure_type`
-5. 不满足 [CONTRIBUTE.md](../../CONTRIBUTE.md) 中的最小本地检查要求
-
-## 8. Review 重点
-
-Review 不要只看“能不能跑”，而要重点看：
-
-1. 是否破坏模块边界
-2. 是否引入新的隐式共享状态
-3. 是否绕过 `RuntimeContext`
-4. 是否把业务规则塞进 `Worker`
-5. 是否让同一 workflow 被多个实现源共同定义
-
-## 9. 当前建议执行顺序
-
-1. 先冻结 `WorkflowPlan`（即 Planner output）、`ActionLog`、`StepResult`、`RuntimeContext`
-2. 再做 `IM` 的单一 workflow 端到端打通
-3. 再复制模式到 `Docs` 和 `Calendar`
-4. 最后再做跨产品联动与自愈
-
-当前推荐落地节奏：
+默认建议：
 
 1. 先冻结契约
 2. 并行启动 `Track A + Track B + Track C`
-3. `Track D` 在运行时事实模型稳定后接入
-4. `Serial Track` 最后接入并做总装联调
+3. `Track D` 在 `RuntimeContext` 契约稳定后接入
+4. `Serial Track` 最后做总装联调
 
-一句话口径：
+为什么这样拆：
 
-- “Track 之间并行，Track 内部串行；契约先冻结，集成最后做。”
+- `Track A` 负责把自然语言收敛为可执行计划
+- `Track B` 负责页面与定位事实
+- `Track C` 负责 workflow 阶段机和步骤验证
+- `Track D` 负责把运行时事实沉淀成可评估产物
+- `Serial Track` 是高耦合层，不适合第一波并行
+
+## 7. Worktree Operating Rules
+
+当前默认分支是 `master`。建议每个主分支使用独立 worktree。
+
+推荐示例：
+
+```bash
+git fetch origin
+git worktree list
+git worktree add ../agent-s-master master
+git worktree add ../agent-s-track-a -b feat/track-a master
+git worktree add ../agent-s-track-b -b feat/track-b master
+git worktree add ../agent-s-track-c -b feat/track-c master
+git worktree add ../agent-s-track-d -b feat/track-d master
+git worktree add ../agent-s-serial -b feat/serial-integration master
+```
+
+角色映射：
+
+- `../agent-s-master`: 只做同步、冻结、集成检查
+- `../agent-s-track-a`: Track A
+- `../agent-s-track-b`: Track B
+- `../agent-s-track-c`: Track C
+- `../agent-s-track-d`: Track D
+- `../agent-s-serial`: Serial Track
+
+操作规则：
+
+1. `master` worktree 保持干净
+2. 一个 worktree 只对应一个活跃分支
+3. 一个分支只在一个 worktree 中主动开发
+4. 不共享会冲突的 `.venv`、缓存或生成产物
+5. 开新 worktree 前先跑 `git worktree list`
+6. 分支合并后及时 `git worktree remove`
+7. 阻塞修补使用 `review/<topic>` 或 `fix/<topic>` 分支，不要直接在 `master` 上改
+
+## 8. Merge / Rebase Canonical Flow
+
+标准合流顺序：
+
+1. 在 `master` 完成 freeze PR
+2. 从同一个 freeze SHA 切出 `Track A / B / C`
+3. A/B/C 开发并各自完成最小验证
+4. 合并前先更新 `master`
+5. 各自 feature 分支 rebase 到最新 `master`
+6. 通过 review 后按依赖顺序合并
+7. `Track D` 需要时再切出并合入
+8. `feat/serial-integration` 从上游合流后的新基线切出
+9. `Serial Track` 最后合并
+
+rebase 规则：
+
+1. rebase 前先 `git status`
+2. 有未提交改动先 commit 或 stash
+3. rebase 改到已 review 的冲突区域时必须重新 review
+4. 远端分支更新使用 `git push --force-with-lease`
+5. 不接受未 rebase 到最新基线的陈旧 PR
+
+特殊规则：
+
+如果旧分支和当前默认分支没有共同祖先，不做常规 rebase，改为从当前默认分支新切分支后手工移植需要的改动。
+
+## 9. Review Gate Ladder
+
+### Gate 1 Self-check
+
+必须具备：
+
+- 手动 plan
+- 文档同步
+- 最小本地验证
+- 验证证据
+
+### Gate 2 Module Review
+
+重点检查：
+
+- 模块边界是否被破坏
+- 契约是否一致
+- fallback / failure path 是否完整
+
+### Gate 3 Integration Review
+
+触发条件：
+
+- `feishu_worker`
+- `worker.py`
+- `grounding.py`
+- `cli_app.py`
+- `procedural_memory.py`
+- 多 track 合流
+
+要求：
+
+- reviewer 独立于 owner
+- 明确集成风险
+- 明确回滚方式
+
+## 10. 当前建议执行节奏
+
+1. 先冻结 `WorkflowPlan`、`ActionLog`、`StepResult`、`RuntimeContext`
+2. 先做 IM 单产品端到端链路
+3. 再复制模式到 Docs 和 Calendar
+4. 最后做跨产品联动和更复杂的自愈能力

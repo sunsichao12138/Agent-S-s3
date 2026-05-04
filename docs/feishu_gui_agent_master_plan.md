@@ -386,3 +386,29 @@ artifacts/
 
 - [archive/feishu_secondary_dev_guide.md](./archive/feishu_secondary_dev_guide.md)
 - [archive/feishu_tools_skills_architecture.md](./archive/feishu_tools_skills_architecture.md)
+
+## 13. 执行治理
+
+`master_plan` 负责回答“做什么、为什么这样拆”，并行开发的具体操作以 [并行开发 Playbook](./process/feishu_gui_agent_parallel_dev_playbook.md) 为准。
+
+本方案的 milestone 推进受以下门禁约束：
+
+1. 进入任何并行开发阶段前，必须先完成共享契约冻结。
+2. Track 内部必须按 handoff gate 串行推进，不能因为“理解差不多了”就提前并写下游模块。
+3. 高耦合文件和多 track 合流必须经过集成级 review。
+4. `Serial Track` 只在上游 tracks 完成最小验证后启动。
+
+里程碑入口标准：
+
+- M0 / M1：基础运行链路可启动，最小 smoke case 可复现
+- M2：`WorkflowPlan`、`FeishuState`、`LocatorResult`、`StepResult` 已冻结
+- M3：至少一个单产品 workflow 已经稳定，运行时事实模型可复用
+- M4：`RuntimeContext` 与报告产物结构已冻结
+- M5：前序链路稳定，允许引入更复杂的异常恢复与跨产品联动
+
+里程碑退出标准：
+
+- 有明确验收结果
+- 对应契约与实现一致
+- 最小验证证据可追溯
+- 剩余风险已经在 review 或 follow-up 中记录
