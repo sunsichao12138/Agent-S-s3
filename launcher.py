@@ -179,6 +179,10 @@ def _apply_env_defaults(cfg: dict):
         cfg["model_url"] = env["oai_base_url"]
     if env.get("model") and not cfg.get("model_id"):
         cfg["model_id"] = env["model"]
+    if not cfg.get("ground_api_key"):
+        ark_key = env.get("ARK_API_KEY") or env.get("api-key")
+        if ark_key:
+            cfg["ground_api_key"] = ark_key
     if (
         env.get("model_reasoning_effort")
         and cfg.get("reasoning_effort", DEFAULT_CONFIG["reasoning_effort"])
@@ -701,7 +705,7 @@ class Launcher:
                 or self.v_model_id.get().strip()
                 or provider_info["default_model"]
             )
-            ground_key = self.v_model_key.get().strip()
+            ground_key = ground_key or self.v_model_key.get().strip()
         else:
             ground_model = ground_model or provider_info["default_model"]
 
@@ -908,7 +912,7 @@ class Launcher:
                 or self.v_model_id.get().strip()
                 or provider_info["default_model"]
             )
-            ground_key = self.v_model_key.get().strip()
+            ground_key = ground_key or self.v_model_key.get().strip()
         else:
             ground_model = ground_model or provider_info["default_model"]
 
