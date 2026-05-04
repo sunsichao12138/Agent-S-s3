@@ -262,6 +262,34 @@ def scale_screen_dimensions(width: int, height: int, max_dim_size: int):
     return safe_width, safe_height
 
 
+def _settle_delay(exec_code: str) -> float:
+    code_lower = exec_code.lower()
+    if any(k in code_lower for k in ("switch_applications", "hotkey('win'", "open(")):
+        return 3.0
+    if "click" in code_lower:
+        if any(
+            k in code_lower
+            for k in (
+                "新建",
+                "文档",
+                "菜单",
+                "menu",
+                "更多",
+                "设置",
+                "添加",
+                "创建",
+                "打开",
+                "上传",
+                "保存",
+            )
+        ):
+            return 2.5
+        return 1.5
+    if any(k in code_lower for k in ("drag", "scroll", "type", "hotkey", "press")):
+        return 1.0
+    return 1.5
+
+
 def capture_desktop_screenshot():
     if platform.system() == "Windows":
         try:
@@ -303,9 +331,12 @@ def run_agent(
             time.sleep(0.1)
 
         print(f"\n🔄 Step {step + 1}/{max_steps}: Getting next action from agent...")
+        t_predict_start = time.time()
 
         # Get next action code from the agent
         info, code = agent.predict(instruction=instruction, observation=obs)
+        t_predict_elapsed = time.time() - t_predict_start
+        print(f"🧠 模型思考 {t_predict_elapsed:.1f}s")
         exec_code = code[0] if code else ""
         trace_execution(f"STEP {step + 1} CODE:\n{exec_code}\n---")
         normalized_code = exec_code.strip().lower()
@@ -331,14 +362,15 @@ def run_agent(
             continue
 
         else:
-            time.sleep(1.0)
             print("EXECUTING CODE:", exec_code, flush=True)
 
             # Check for pause state before execution
             while paused:
                 time.sleep(0.1)
 
-            # Ask for permission before executing
+            if step > 0:
+                time.sleep(0.5)
+
             try:
                 exec(exec_code)
             except Exception as exc:
@@ -347,7 +379,10 @@ def run_agent(
                 trace_execution(f"EXEC_CODE_ERROR: {exc!r}\n{tb}")
                 logger.exception("Error executing generated code")
                 continue
-            time.sleep(1.0)
+
+            settle_post = _settle_delay(exec_code)
+            print(f"⏳ 等待 UI 稳定 ({settle_post:.1f}s)...")
+            time.sleep(settle_post)
 
             # Update task and subtask trajectories
             if "reflection" in info and "executor_plan" in info:

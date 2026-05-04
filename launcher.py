@@ -8,12 +8,22 @@ import sys
 import os
 import re
 import json
+import copy
+import platform
+import ctypes
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 CLI_APP = os.path.join(PROJECT_DIR, "gui_agents", "s3", "cli_app.py")
 CONFIG_FILE = os.path.join(PROJECT_DIR, "config.json")
+ENV_FILE = os.path.join(PROJECT_DIR, "env.txt")
+HISTORY_FILE = os.path.join(PROJECT_DIR, "command_history.json")
+
+CANDIDATE_COMMANDS = [
+    "打开消息中的bot功能测试群聊，在消息发送框输入hello，并且在聊天框点击右侧的表情图标，选择一个随机表情，并且发送",
+    "打开云文档页面，点击新建按钮，创建空白文档",
+]
 
 DEFAULT_CONFIG = {
     "model_api_key": "",
@@ -25,10 +35,96 @@ DEFAULT_CONFIG = {
     "ground_model": "doubao-seed-1-6-vision-250815",
     "reflection_mode": "on_failure",
     "reasoning_effort": "medium",
+    "first_run_completed": False,
+    "grounding_overrides": {},
+    "detected_environment": None,
+}
+
+GROUND_PROVIDERS = {
+    "doubao_ark": {
+        "provider": "openai",
+        "url": "https://ark.cn-beijing.volces.com/api/v3",
+        "default_model": "doubao-seed-1-6-vision-250815",
+        "coord_range": 1000,
+        "image_max_dim": 2000,
+    },
+    "open_router": {
+        "provider": "open_router",
+        "url": "https://openrouter.ai/api/v1",
+        "default_model": "bytedance/ui-tars-1.5-7b",
+        "coord_range": 1920,
+        "image_max_dim": 1920,
+    },
+    "openai": {
+        "provider": "openai",
+        "url": "https://api.openai.com/v1",
+        "default_model": "gpt-4o",
+        "coord_range": 1920,
+        "image_max_dim": 1920,
+    },
 }
 
 
+def detect_platform_info() -> dict:
+    system = platform.system().lower()
+    return {
+        "system": system,
+        "release": platform.release(),
+        "version": platform.version(),
+        "machine": platform.machine(),
+        "display_name": {
+            "windows": "Windows",
+            "darwin": "macOS",
+            "linux": "Linux",
+        }.get(system, system.capitalize()),
+    }
+
+
+def detect_dpi_scale() -> float:
+    try:
+        if platform.system() == "Windows":
+            user32 = ctypes.windll.user32
+            if hasattr(user32, "GetDpiForSystem"):
+                return round(user32.GetDpiForSystem() / 96.0, 2)
+    except Exception:
+        pass
+
+    root = None
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        return round(root.winfo_fpixels("1i") / 96.0, 2)
+    except Exception:
+        return 1.0
+    finally:
+        if root is not None:
+            root.destroy()
+
+
+def detect_environment() -> dict:
+    sw, sh = pyautogui.size()
+    dpi_scale = detect_dpi_scale()
+    env = {
+        "platform": detect_platform_info(),
+        "screen_width": sw,
+        "screen_height": sh,
+        "dpi_scale": dpi_scale,
+        "physical_width": int(sw * dpi_scale) if dpi_scale > 0 else sw,
+        "physical_height": int(sh * dpi_scale) if dpi_scale > 0 else sh,
+        "grounding_recommendations": {},
+    }
+    for key, info in GROUND_PROVIDERS.items():
+        image_max = info.get("image_max_dim", info["coord_range"])
+        scale = min(image_max / sw, image_max / sh, 1.0)
+        env["grounding_recommendations"][key] = {
+            "width": int(sw * scale),
+            "height": int(sh * scale),
+        }
+    return env
+
+
 def load_config():
+    base_cfg = copy.deepcopy(DEFAULT_CONFIG)
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -40,15 +136,85 @@ def load_config():
                 saved["ground_url"] = DEFAULT_CONFIG["model_url"]
                 if saved.get("model_id"):
                     saved["ground_model"] = saved["model_id"]
-            return {**DEFAULT_CONFIG, **saved}
+            for key in (
+                "first_run_completed",
+                "grounding_overrides",
+                "detected_environment",
+            ):
+                if key not in saved:
+                    saved[key] = copy.deepcopy(DEFAULT_CONFIG[key])
+            _apply_env_defaults(saved)
+            return {**base_cfg, **saved}
         except Exception:
             pass
-    return DEFAULT_CONFIG.copy()
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+    _apply_env_defaults(cfg)
+    return cfg
+
+
+def _parse_env_txt(path: str) -> dict:
+    result = {}
+    if not os.path.exists(path):
+        return result
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if ":" in line:
+                key, _, value = line.partition(":")
+                result[key.strip()] = value.strip()
+    return result
+
+
+def _apply_env_defaults(cfg: dict):
+    env = _parse_env_txt(ENV_FILE)
+    if env.get("oai_api") and not cfg.get("model_api_key"):
+        cfg["model_api_key"] = env["oai_api"]
+    if (
+        env.get("oai_base_url")
+        and cfg.get("model_url", DEFAULT_CONFIG["model_url"])
+        == DEFAULT_CONFIG["model_url"]
+    ):
+        cfg["model_url"] = env["oai_base_url"]
+    if env.get("model") and not cfg.get("model_id"):
+        cfg["model_id"] = env["model"]
+    if (
+        env.get("model_reasoning_effort")
+        and cfg.get("reasoning_effort", DEFAULT_CONFIG["reasoning_effort"])
+        == DEFAULT_CONFIG["reasoning_effort"]
+    ):
+        cfg["reasoning_effort"] = env["model_reasoning_effort"]
+    if (
+        env.get("reflection_mode")
+        and cfg.get("reflection_mode", DEFAULT_CONFIG["reflection_mode"])
+        == DEFAULT_CONFIG["reflection_mode"]
+    ):
+        cfg["reflection_mode"] = env["reflection_mode"]
 
 
 def save_config(cfg: dict):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
+def run_first_run_setup(cfg: dict):
+    try:
+        env = detect_environment()
+        cfg["detected_environment"] = env
+        cfg["first_run_completed"] = True
+        provider = cfg.get("ground_provider", DEFAULT_CONFIG["ground_provider"])
+        recs = env.get("grounding_recommendations", {})
+        if provider in recs and provider not in cfg.get("grounding_overrides", {}):
+            cfg.setdefault("grounding_overrides", {})
+            cfg["grounding_overrides"][provider] = recs[provider]
+        save_config(cfg)
+        return env
+    except Exception:
+        cfg["first_run_completed"] = True
+        cfg["detected_environment"] = {}
+        save_config(cfg)
+        return {}
 
 
 class Launcher:
@@ -60,9 +226,12 @@ class Launcher:
         self.output_queue = queue.Queue()
         self.agent_ready = False
         self.cfg = load_config()
+        self.command_history = self._load_command_history()
+        if not self.cfg.get("first_run_completed"):
+            self._run_first_run_setup()
 
         self._build_ui()
-        self._auto_detect_resolution()
+        self._load_resolution_from_config()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ─── UI ───────────────────────────────────────────────────────────────────
@@ -175,10 +344,22 @@ class Launcher:
         ttk.Label(res_frame, textvariable=self.v_screen_info, foreground="gray").pack(
             side="left", padx=(10, 0)
         )
+        env_frame = ttk.Frame(cfg)
+        env_frame.grid(row=8, column=1, sticky="w", padx=(8, 0), pady=(2, 0))
+        self.v_env_info = tk.StringVar()
+        ttk.Label(env_frame, textvariable=self.v_env_info, foreground="gray").pack(
+            side="left"
+        )
+        ttk.Button(
+            env_frame,
+            text="重新检测环境",
+            command=self._redetect_environment,
+            width=14,
+        ).pack(side="left", padx=(12, 0))
 
         # 启动按钮
         btn_frame = ttk.Frame(cfg)
-        btn_frame.grid(row=8, column=0, columnspan=2, pady=(8, 0))
+        btn_frame.grid(row=9, column=0, columnspan=2, pady=(8, 0))
         self.btn_start = ttk.Button(
             btn_frame, text="▶  启动 Agent", command=self._start_agent, width=20
         )
@@ -231,12 +412,13 @@ class Launcher:
         input_frame.columnconfigure(0, weight=1)
 
         self.v_query = tk.StringVar()
-        self.entry_query = ttk.Entry(
+        self.cb_query = ttk.Combobox(
             input_frame, textvariable=self.v_query, font=("Microsoft YaHei", 11)
         )
-        self.entry_query.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        self.entry_query.bind("<Return>", lambda e: self._send_query())
-        self.entry_query.configure(state="disabled")
+        self.cb_query.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.cb_query.bind("<Return>", lambda e: self._send_query())
+        self.cb_query["values"] = self.command_history
+        self.cb_query.configure(state="disabled")
 
         self.btn_send = ttk.Button(
             input_frame,
@@ -408,52 +590,94 @@ class Launcher:
 
     # ─── 分辨率自动检测 ───────────────────────────────────────────────────────
 
-    def _auto_detect_resolution(self):
-        if self.v_ground_provider.get().strip() == "doubao_ark":
-            self.v_gw.set("1000")
-            self.v_gh.set("1000")
-            sw, sh = pyautogui.size()
-            self.v_screen_info.set(f"（屏幕 {sw}×{sh}，豆包归一化 1000×1000）")
-            return
-        sw, sh = pyautogui.size()
-        max_dim = 1920
-        scale = min(max_dim / sw, max_dim / sh, 1.0)
-        gw = int(sw * scale)
-        gh = int(sh * scale)
+    def _ground_provider_info(self):
+        provider_key = self.v_ground_provider.get().strip()
+        return GROUND_PROVIDERS.get(provider_key, GROUND_PROVIDERS["doubao_ark"])
+
+    def _run_first_run_setup(self):
+        run_first_run_setup(self.cfg)
+
+    def _load_resolution_from_config(self):
+        provider_key = self.v_ground_provider.get().strip()
+        provider_info = self._ground_provider_info()
+        overrides = self.cfg.get("grounding_overrides", {})
+        detected = self.cfg.get("detected_environment") or {}
+
+        if provider_key in overrides:
+            resolution = overrides[provider_key]
+            gw, gh = resolution["width"], resolution["height"]
+        else:
+            recs = detected.get("grounding_recommendations", {})
+            if provider_key in recs:
+                gw, gh = recs[provider_key]["width"], recs[provider_key]["height"]
+            else:
+                gw, gh = self._compute_grounding_resolution(provider_info)
+
         self.v_gw.set(str(gw))
         self.v_gh.set(str(gh))
-        self.v_screen_info.set(f"（屏幕 {sw}×{sh}，自动缩放）")
+        sw, sh = pyautogui.size()
+        self.v_screen_info.set(
+            f"（屏幕 {sw}×{sh}，坐标范围 0-{provider_info['coord_range']}）"
+        )
+        self._update_env_display(detected)
+
+    def _compute_grounding_resolution(self, provider_info: dict):
+        sw, sh = pyautogui.size()
+        image_max = provider_info.get("image_max_dim", provider_info["coord_range"])
+        scale = min(image_max / sw, image_max / sh, 1.0)
+        return int(sw * scale), int(sh * scale)
+
+    def _update_env_display(self, env: dict):
+        if not env:
+            self.v_env_info.set("")
+            return
+        platform_info = env.get("platform", {})
+        parts = [platform_info.get("display_name", "Unknown")]
+        sw = env.get("screen_width", 0)
+        sh = env.get("screen_height", 0)
+        if sw and sh:
+            parts.append(f"{sw}x{sh}")
+        dpi = env.get("dpi_scale", 1.0)
+        if dpi and abs(dpi - 1.0) > 0.01:
+            parts.append(f"缩放 {int(dpi * 100)}%")
+        self.v_env_info.set(" | ".join(parts))
+
+    def _redetect_environment(self):
+        try:
+            env = detect_environment()
+            provider_key = self.v_ground_provider.get().strip()
+            recs = env.get("grounding_recommendations", {})
+            self.cfg["detected_environment"] = env
+            self.cfg["first_run_completed"] = True
+            if provider_key in recs:
+                self.cfg.setdefault("grounding_overrides", {})
+                self.cfg["grounding_overrides"][provider_key] = recs[provider_key]
+            save_config(self.cfg)
+            self._load_resolution_from_config()
+            self.v_status.set("环境检测完成 ✓")
+        except Exception as exc:
+            messagebox.showerror("检测失败", f"环境检测失败：{exc}")
+
+    def _auto_detect_resolution(self):
+        self._load_resolution_from_config()
 
     def _apply_ground_provider_defaults(self):
         provider = self.v_ground_provider.get().strip()
-        if provider == "openai":
-            self.v_ground_model.set("gpt-4o")
-            self._auto_detect_resolution()
-        elif provider == "doubao_ark":
+        provider_info = self._ground_provider_info()
+        if provider == "doubao_ark":
             if not self.v_ground_model.get().strip():
-                self.v_ground_model.set(DEFAULT_CONFIG["ground_model"])
+                self.v_ground_model.set(provider_info["default_model"])
             if not self.v_ground_key.get().strip():
                 self.v_ground_key.set(self.v_model_key.get().strip())
-            # 豆包模型输出 0-1000 归一化坐标，grounding_width/height 须设为 1000
-            self.v_gw.set("1000")
-            self.v_gh.set("1000")
         else:
-            self.v_ground_model.set("bytedance/ui-tars-1.5-7b")
-            self._auto_detect_resolution()
+            self.v_ground_model.set(provider_info["default_model"])
+        self._load_resolution_from_config()
 
     def _ground_provider_arg(self):
-        provider = self.v_ground_provider.get().strip()
-        if provider == "doubao_ark":
-            return "openai"
-        return provider
+        return self._ground_provider_info()["provider"]
 
     def _ground_url(self):
-        provider = self.v_ground_provider.get().strip()
-        if provider == "openai":
-            return "https://api.openai.com/v1"
-        if provider == "doubao_ark":
-            return DEFAULT_CONFIG["model_url"]
-        return "https://openrouter.ai/api/v1"
+        return self._ground_provider_info()["url"]
 
     # ─── 启动 / 停止 ──────────────────────────────────────────────────────────
 
@@ -468,11 +692,18 @@ class Launcher:
         env["PYTHONPATH"] = PROJECT_DIR
         env["PYTHONIOENCODING"] = "utf-8"
 
+        provider_info = self._ground_provider_info()
         ground_model = self.v_ground_model.get().strip()
         ground_key = self.v_ground_key.get().strip()
         if self.v_ground_provider.get().strip() == "doubao_ark":
-            ground_model = ground_model or self.v_model_id.get().strip()
+            ground_model = (
+                ground_model
+                or self.v_model_id.get().strip()
+                or provider_info["default_model"]
+            )
             ground_key = self.v_model_key.get().strip()
+        else:
+            ground_model = ground_model or provider_info["default_model"]
 
         cmd = [
             sys.executable,
@@ -482,7 +713,7 @@ class Launcher:
             "--model",
             self.v_model_id.get().strip(),
             "--model_url",
-            DEFAULT_CONFIG["model_url"],
+            self.cfg.get("model_url", DEFAULT_CONFIG["model_url"]),
             "--model_api_key",
             self.v_model_key.get().strip(),
             "--ground_provider",
@@ -504,8 +735,8 @@ class Launcher:
             "--reasoning_effort",
             self.v_reasoning_effort.get().strip(),
         ]
-        if self.v_ground_provider.get().strip() == "doubao_ark":
-            cmd.extend(["--ground_coord_scale", "1000"])
+        if provider_info["coord_range"] != provider_info.get("image_max_dim"):
+            cmd.extend(["--ground_coord_scale", str(provider_info["coord_range"])])
 
         self.process = subprocess.Popen(
             cmd,
@@ -538,7 +769,7 @@ class Launcher:
         self.btn_start.configure(state="normal")
         self.btn_stop.configure(state="disabled")
         self.btn_send.configure(state="disabled")
-        self.entry_query.configure(state="disabled")
+        self.cb_query.configure(state="disabled")
         self.v_status.set("已停止")
         self._log("\n─── Agent 已停止 ───\n", "warn")
 
@@ -581,8 +812,8 @@ class Launcher:
                 self.agent_ready = True
                 self._log("✅ Agent 就绪，请在下方输入任务\n", "success")
                 self.btn_send.configure(state="normal")
-                self.entry_query.configure(state="normal")
-                self.entry_query.focus()
+                self.cb_query.configure(state="normal")
+                self.cb_query.focus()
             return
 
         # 自动回复"继续查询"提示
@@ -604,6 +835,36 @@ class Launcher:
 
         self._log(line, tag)
 
+    # ─── 指令历史 ─────────────────────────────────────────────────────────────
+
+    def _load_command_history(self):
+        if os.path.exists(HISTORY_FILE):
+            try:
+                with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    return data
+            except Exception:
+                pass
+        return list(CANDIDATE_COMMANDS)
+
+    def _save_command_history(self, history: list):
+        try:
+            with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+                json.dump(history, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _add_to_history(self, command: str):
+        values = list(self.cb_query["values"])
+        if command in values:
+            values.remove(command)
+        values.insert(0, command)
+        if len(values) > 50:
+            values = values[:50]
+        self.cb_query["values"] = values
+        self._save_command_history(values)
+
     # ─── 发送指令 ─────────────────────────────────────────────────────────────
 
     def _send_query(self):
@@ -612,9 +873,10 @@ class Launcher:
             return
         self._log(f"\n▶ 指令：{query}\n", "query")
         self._write_stdin(query + "\n")
+        self._add_to_history(query)
         self.v_query.set("")
         self.btn_send.configure(state="disabled")
-        self.entry_query.configure(state="disabled")
+        self.cb_query.configure(state="disabled")
         self.agent_ready = False
 
     def _write_stdin(self, text: str):
@@ -636,24 +898,46 @@ class Launcher:
     # ─── 关闭 ─────────────────────────────────────────────────────────────────
 
     def _save_config(self):
+        provider_key = self.v_ground_provider.get().strip()
+        provider_info = self._ground_provider_info()
         ground_model = self.v_ground_model.get().strip()
         ground_key = self.v_ground_key.get().strip()
-        if self.v_ground_provider.get().strip() == "doubao_ark":
-            ground_model = ground_model or self.v_model_id.get().strip()
+        if provider_key == "doubao_ark":
+            ground_model = (
+                ground_model
+                or self.v_model_id.get().strip()
+                or provider_info["default_model"]
+            )
             ground_key = self.v_model_key.get().strip()
-        save_config(
+        else:
+            ground_model = ground_model or provider_info["default_model"]
+
+        self.cfg.update(
             {
                 "model_api_key": self.v_model_key.get().strip(),
                 "model_id": self.v_model_id.get().strip(),
-                "model_url": DEFAULT_CONFIG["model_url"],
-                "ground_provider": self.v_ground_provider.get().strip(),
+                "model_url": self.cfg.get("model_url", DEFAULT_CONFIG["model_url"]),
+                "ground_provider": provider_key,
                 "ground_api_key": ground_key,
                 "ground_url": self._ground_url(),
                 "ground_model": ground_model,
                 "reflection_mode": self.v_reflection_mode.get().strip(),
                 "reasoning_effort": self.v_reasoning_effort.get().strip(),
+                "first_run_completed": True,
             }
         )
+        try:
+            gw = int(self.v_gw.get().strip())
+            gh = int(self.v_gh.get().strip())
+            if gw > 0 and gh > 0:
+                self.cfg.setdefault("grounding_overrides", {})
+                self.cfg["grounding_overrides"][provider_key] = {
+                    "width": gw,
+                    "height": gh,
+                }
+        except ValueError:
+            pass
+        save_config(self.cfg)
         self.v_status.set("配置已保存 ✓")
 
     def _on_close(self):
