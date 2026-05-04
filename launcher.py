@@ -9,28 +9,33 @@ import os
 import re
 import json
 
-ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 CLI_APP = os.path.join(PROJECT_DIR, "gui_agents", "s3", "cli_app.py")
 CONFIG_FILE = os.path.join(PROJECT_DIR, "config.json")
 
 DEFAULT_CONFIG = {
-    "model_api_key":  "",
-    "model_id":       "",
-    "model_url":      "https://ark.cn-beijing.volces.com/api/v3",
+    "model_api_key": "",
+    "model_id": "",
+    "model_url": "https://ark.cn-beijing.volces.com/api/v3",
     "ground_provider": "doubao_ark",
     "ground_api_key": "",
-    "ground_url":     "https://ark.cn-beijing.volces.com/api/v3",
-    "ground_model":   "doubao-seed-1-6-vision-250815",
+    "ground_url": "https://ark.cn-beijing.volces.com/api/v3",
+    "ground_model": "doubao-seed-1-6-vision-250815",
+    "reflection_mode": "on_failure",
+    "reasoning_effort": "medium",
 }
+
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 saved = json.load(f)
-            if "ground_provider" not in saved and saved.get("ground_api_key", "").startswith("ark-"):
+            if "ground_provider" not in saved and saved.get(
+                "ground_api_key", ""
+            ).startswith("ark-"):
                 saved["ground_provider"] = "doubao_ark"
                 saved["ground_url"] = DEFAULT_CONFIG["model_url"]
                 if saved.get("model_id"):
@@ -39,6 +44,7 @@ def load_config():
         except Exception:
             pass
     return DEFAULT_CONFIG.copy()
+
 
 def save_config(cfg: dict):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -91,11 +97,17 @@ class Launcher:
         # 主模型
         ttk.Label(cfg, text="豆包 API Key").grid(row=0, column=0, sticky="w", pady=2)
         self.v_model_key = tk.StringVar(value=self.cfg["model_api_key"])
-        ttk.Entry(cfg, textvariable=self.v_model_key, show="*", width=50).grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        ttk.Entry(cfg, textvariable=self.v_model_key, show="*", width=50).grid(
+            row=0, column=1, sticky="ew", padx=(8, 0)
+        )
 
-        ttk.Label(cfg, text="豆包 Endpoint ID").grid(row=1, column=0, sticky="w", pady=2)
+        ttk.Label(cfg, text="豆包 Endpoint ID").grid(
+            row=1, column=0, sticky="w", pady=2
+        )
         self.v_model_id = tk.StringVar(value=self.cfg["model_id"])
-        ttk.Entry(cfg, textvariable=self.v_model_id, width=50).grid(row=1, column=1, sticky="ew", padx=(8, 0))
+        ttk.Entry(cfg, textvariable=self.v_model_id, width=50).grid(
+            row=1, column=1, sticky="ew", padx=(8, 0)
+        )
 
         # 定位模型
         ttk.Label(cfg, text="定位 Provider").grid(row=2, column=0, sticky="w", pady=2)
@@ -110,38 +122,82 @@ class Launcher:
             state="readonly",
         )
         self.cmb_ground_provider.pack(side="left")
-        self.cmb_ground_provider.bind("<<ComboboxSelected>>", lambda e: self._apply_ground_provider_defaults())
+        self.cmb_ground_provider.bind(
+            "<<ComboboxSelected>>", lambda e: self._apply_ground_provider_defaults()
+        )
 
         ttk.Label(cfg, text="定位 API Key").grid(row=3, column=0, sticky="w", pady=2)
         self.v_ground_key = tk.StringVar(value=self.cfg["ground_api_key"])
-        ttk.Entry(cfg, textvariable=self.v_ground_key, show="*", width=50).grid(row=3, column=1, sticky="ew", padx=(8, 0))
+        ttk.Entry(cfg, textvariable=self.v_ground_key, show="*", width=50).grid(
+            row=3, column=1, sticky="ew", padx=(8, 0)
+        )
 
         ttk.Label(cfg, text="定位模型").grid(row=4, column=0, sticky="w", pady=2)
         self.v_ground_model = tk.StringVar(value=self.cfg["ground_model"])
-        ttk.Entry(cfg, textvariable=self.v_ground_model, width=50).grid(row=4, column=1, sticky="ew", padx=(8, 0))
+        ttk.Entry(cfg, textvariable=self.v_ground_model, width=50).grid(
+            row=4, column=1, sticky="ew", padx=(8, 0)
+        )
+
+        ttk.Label(cfg, text="反思频率").grid(row=5, column=0, sticky="w", pady=2)
+        self.v_reflection_mode = tk.StringVar(
+            value=self.cfg.get("reflection_mode", "on_failure")
+        )
+        ttk.Combobox(
+            cfg,
+            textvariable=self.v_reflection_mode,
+            values=("full", "reduced", "on_failure", "off"),
+            width=16,
+            state="readonly",
+        ).grid(row=5, column=1, sticky="w", padx=(8, 0))
+
+        ttk.Label(cfg, text="推理强度").grid(row=6, column=0, sticky="w", pady=2)
+        self.v_reasoning_effort = tk.StringVar(
+            value=self.cfg.get("reasoning_effort", "medium")
+        )
+        ttk.Combobox(
+            cfg,
+            textvariable=self.v_reasoning_effort,
+            values=("low", "medium", "high", "xhigh"),
+            width=16,
+            state="readonly",
+        ).grid(row=6, column=1, sticky="w", padx=(8, 0))
 
         # 分辨率
-        ttk.Label(cfg, text="定位分辨率").grid(row=5, column=0, sticky="w", pady=2)
+        ttk.Label(cfg, text="定位分辨率").grid(row=7, column=0, sticky="w", pady=2)
         res_frame = ttk.Frame(cfg)
-        res_frame.grid(row=5, column=1, sticky="w", padx=(8, 0))
+        res_frame.grid(row=7, column=1, sticky="w", padx=(8, 0))
         self.v_gw = tk.StringVar()
         self.v_gh = tk.StringVar()
         ttk.Entry(res_frame, textvariable=self.v_gw, width=6).pack(side="left")
         ttk.Label(res_frame, text=" x ").pack(side="left")
         ttk.Entry(res_frame, textvariable=self.v_gh, width=6).pack(side="left")
         self.v_screen_info = tk.StringVar()
-        ttk.Label(res_frame, textvariable=self.v_screen_info, foreground="gray").pack(side="left", padx=(10, 0))
+        ttk.Label(res_frame, textvariable=self.v_screen_info, foreground="gray").pack(
+            side="left", padx=(10, 0)
+        )
 
         # 启动按钮
         btn_frame = ttk.Frame(cfg)
-        btn_frame.grid(row=6, column=0, columnspan=2, pady=(8, 0))
-        self.btn_start = ttk.Button(btn_frame, text="▶  启动 Agent", command=self._start_agent, width=20)
+        btn_frame.grid(row=8, column=0, columnspan=2, pady=(8, 0))
+        self.btn_start = ttk.Button(
+            btn_frame, text="▶  启动 Agent", command=self._start_agent, width=20
+        )
         self.btn_start.pack(side="left", padx=4)
-        self.btn_stop = ttk.Button(btn_frame, text="■  停止", command=self._stop_agent, width=10, state="disabled")
+        self.btn_stop = ttk.Button(
+            btn_frame,
+            text="■  停止",
+            command=self._stop_agent,
+            width=10,
+            state="disabled",
+        )
         self.btn_stop.pack(side="left", padx=4)
-        ttk.Button(btn_frame, text="💾 保存配置", command=self._save_config, width=12).pack(side="left", padx=4)
+        ttk.Button(
+            btn_frame, text="💾 保存配置", command=self._save_config, width=12
+        ).pack(side="left", padx=4)
         self.v_status = tk.StringVar(value="未启动")
-        ttk.Label(btn_frame, textvariable=self.v_status, foreground="gray").pack(side="left", padx=12)
+        ttk.Label(btn_frame, textvariable=self.v_status, foreground="gray").pack(
+            side="left", padx=12
+        )
 
         # ── 中部：日志区 ──
         log_frame = ttk.LabelFrame(parent, text="运行日志", padding=4)
@@ -149,19 +205,25 @@ class Launcher:
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
 
-        self.log = scrolledtext.ScrolledText(log_frame, wrap="word", height=18,
-                                             font=("Consolas", 9), state="disabled",
-                                             bg="#1e1e1e", fg="#d4d4d4",
-                                             insertbackground="white")
+        self.log = scrolledtext.ScrolledText(
+            log_frame,
+            wrap="word",
+            height=18,
+            font=("Consolas", 9),
+            state="disabled",
+            bg="#1e1e1e",
+            fg="#d4d4d4",
+            insertbackground="white",
+        )
         self.log.grid(row=0, column=0, sticky="nsew")
 
         # 颜色标签
-        self.log.tag_config("info",    foreground="#9cdcfe")
-        self.log.tag_config("action",  foreground="#4ec9b0")
-        self.log.tag_config("warn",    foreground="#ce9178")
-        self.log.tag_config("query",   foreground="#dcdcaa")
+        self.log.tag_config("info", foreground="#9cdcfe")
+        self.log.tag_config("action", foreground="#4ec9b0")
+        self.log.tag_config("warn", foreground="#ce9178")
+        self.log.tag_config("query", foreground="#dcdcaa")
         self.log.tag_config("success", foreground="#6a9955")
-        self.log.tag_config("normal",  foreground="#d4d4d4")
+        self.log.tag_config("normal", foreground="#d4d4d4")
 
         # ── 底部：指令输入区 ──
         input_frame = ttk.LabelFrame(parent, text="任务指令", padding=6)
@@ -169,12 +231,20 @@ class Launcher:
         input_frame.columnconfigure(0, weight=1)
 
         self.v_query = tk.StringVar()
-        self.entry_query = ttk.Entry(input_frame, textvariable=self.v_query, font=("Microsoft YaHei", 11))
+        self.entry_query = ttk.Entry(
+            input_frame, textvariable=self.v_query, font=("Microsoft YaHei", 11)
+        )
         self.entry_query.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         self.entry_query.bind("<Return>", lambda e: self._send_query())
         self.entry_query.configure(state="disabled")
 
-        self.btn_send = ttk.Button(input_frame, text="发送", command=self._send_query, width=10, state="disabled")
+        self.btn_send = ttk.Button(
+            input_frame,
+            text="发送",
+            command=self._send_query,
+            width=10,
+            state="disabled",
+        )
         self.btn_send.grid(row=0, column=1)
 
     # ── SOP tab ───────────────────────────────────────────────────────────────
@@ -185,8 +255,12 @@ class Launcher:
 
         toolbar = ttk.Frame(parent)
         toolbar.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 2))
-        ttk.Button(toolbar, text="🔄 刷新列表", command=self._reload_sops).pack(side="left")
-        ttk.Label(toolbar, text="  点击卡片填写参数并执行", foreground="gray").pack(side="left")
+        ttk.Button(toolbar, text="🔄 刷新列表", command=self._reload_sops).pack(
+            side="left"
+        )
+        ttk.Label(toolbar, text="  点击卡片填写参数并执行", foreground="gray").pack(
+            side="left"
+        )
 
         canvas = tk.Canvas(parent, highlightthickness=0)
         canvas.grid(row=1, column=0, sticky="nsew", padx=8, pady=4)
@@ -195,57 +269,75 @@ class Launcher:
         canvas.configure(yscrollcommand=vsb.set)
 
         self._sop_frame = ttk.Frame(canvas)
-        self._sop_frame_id = canvas.create_window((0, 0), window=self._sop_frame, anchor="nw")
-        self._sop_frame.bind("<Configure>",
-                             lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<Configure>",
-                    lambda e: canvas.itemconfig(self._sop_frame_id, width=e.width))
-        canvas.bind_all("<MouseWheel>",
-                        lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
+        self._sop_frame_id = canvas.create_window(
+            (0, 0), window=self._sop_frame, anchor="nw"
+        )
+        self._sop_frame.bind(
+            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.bind(
+            "<Configure>",
+            lambda e: canvas.itemconfig(self._sop_frame_id, width=e.width),
+        )
+        canvas.bind_all(
+            "<MouseWheel>",
+            lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"),
+        )
 
         log_frame = ttk.LabelFrame(parent, text="执行日志", padding=4)
         log_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(4, 8))
         log_frame.columnconfigure(0, weight=1)
 
-        self.sop_log = scrolledtext.ScrolledText(log_frame, wrap="word", height=8,
-                                                 font=("Consolas", 9), state="disabled",
-                                                 bg="#1e1e1e", fg="#d4d4d4")
+        self.sop_log = scrolledtext.ScrolledText(
+            log_frame,
+            wrap="word",
+            height=8,
+            font=("Consolas", 9),
+            state="disabled",
+            bg="#1e1e1e",
+            fg="#d4d4d4",
+        )
         self.sop_log.grid(row=0, column=0, sticky="ew")
-        self.sop_log.tag_config("ok",   foreground="#6a9955")
-        self.sop_log.tag_config("err",  foreground="#ce9178")
+        self.sop_log.tag_config("ok", foreground="#6a9955")
+        self.sop_log.tag_config("err", foreground="#ce9178")
         self.sop_log.tag_config("info", foreground="#9cdcfe")
 
         self._reload_sops()
 
     def _reload_sops(self):
         from sop_executor import list_sops
+
         for w in self._sop_frame.winfo_children():
             w.destroy()
         sops = list_sops()
         if not sops:
-            ttk.Label(self._sop_frame,
-                      text="sops/ 目录为空，请在其中添加 JSON 文件",
-                      foreground="gray").pack(padx=12, pady=20)
+            ttk.Label(
+                self._sop_frame,
+                text="sops/ 目录为空，请在其中添加 JSON 文件",
+                foreground="gray",
+            ).pack(padx=12, pady=20)
             return
         for sop in sops:
             self._make_sop_card(sop)
 
     def _make_sop_card(self, sop: dict):
-        card = ttk.LabelFrame(self._sop_frame,
-                              text=sop.get("name", "未命名"),
-                              padding=8)
+        card = ttk.LabelFrame(
+            self._sop_frame, text=sop.get("name", "未命名"), padding=8
+        )
         card.pack(fill="x", padx=6, pady=4)
         card.columnconfigure(1, weight=1)
 
         desc = sop.get("description", "")
         if desc:
-            ttk.Label(card, text=desc, foreground="gray",
-                      wraplength=500, justify="left").grid(
-                row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+            ttk.Label(
+                card, text=desc, foreground="gray", wraplength=500, justify="left"
+            ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
 
         param_vars = {}
         for i, p in enumerate(sop.get("params", []), start=1):
-            ttk.Label(card, text=p["label"]).grid(row=i, column=0, sticky="w", padx=(0, 8))
+            ttk.Label(card, text=p["label"]).grid(
+                row=i, column=0, sticky="w", padx=(0, 8)
+            )
             var = tk.StringVar()
             entry = ttk.Entry(card, textvariable=var, width=40)
             entry.grid(row=i, column=1, sticky="ew")
@@ -263,15 +355,16 @@ class Launcher:
                         ent.insert(0, ph)
                         ent.configure(foreground="gray")
 
-                entry.bind("<FocusIn>",  _on_focus_in)
+                entry.bind("<FocusIn>", _on_focus_in)
                 entry.bind("<FocusOut>", _on_focus_out)
 
             param_vars[p["name"]] = (var, p.get("placeholder", ""))
 
         row_btn = max(len(sop.get("params", [])) + 1, 1)
         ttk.Button(
-            card, text="▶  立即执行",
-            command=lambda s=sop, pv=param_vars: self._run_sop(s, pv)
+            card,
+            text="▶  立即执行",
+            command=lambda s=sop, pv=param_vars: self._run_sop(s, pv),
         ).grid(row=row_btn, column=0, columnspan=2, pady=(8, 0))
 
     def _run_sop(self, sop: dict, param_vars: dict):
@@ -282,8 +375,11 @@ class Launcher:
                 val = ""
             params[name] = val
 
-        missing = [p["label"] for p in sop.get("params", [])
-                   if not params.get(p["name"]) and not p.get("optional")]
+        missing = [
+            p["label"]
+            for p in sop.get("params", [])
+            if not params.get(p["name"]) and not p.get("optional")
+        ]
         if missing:
             messagebox.showwarning("缺少参数", f"请填写：{', '.join(missing)}")
             return
@@ -292,6 +388,7 @@ class Launcher:
 
         def worker():
             from sop_executor import run_sop
+
             try:
                 run_sop(sop, params, log_fn=lambda m: self._sop_log_write(m + "\n"))
             except Exception as e:
@@ -378,26 +475,47 @@ class Launcher:
             ground_key = self.v_model_key.get().strip()
 
         cmd = [
-            sys.executable, CLI_APP,
-            "--provider", "openai",
-            "--model", self.v_model_id.get().strip(),
-            "--model_url", DEFAULT_CONFIG["model_url"],
-            "--model_api_key", self.v_model_key.get().strip(),
-            "--ground_provider", self._ground_provider_arg(),
-            "--ground_url", self._ground_url(),
-            "--ground_api_key", ground_key,
-            "--ground_model", ground_model,
-            "--grounding_width", self.v_gw.get().strip(),
-            "--grounding_height", self.v_gh.get().strip(),
-            "--budget", "25",
+            sys.executable,
+            CLI_APP,
+            "--provider",
+            "openai",
+            "--model",
+            self.v_model_id.get().strip(),
+            "--model_url",
+            DEFAULT_CONFIG["model_url"],
+            "--model_api_key",
+            self.v_model_key.get().strip(),
+            "--ground_provider",
+            self._ground_provider_arg(),
+            "--ground_url",
+            self._ground_url(),
+            "--ground_api_key",
+            ground_key,
+            "--ground_model",
+            ground_model,
+            "--grounding_width",
+            self.v_gw.get().strip(),
+            "--grounding_height",
+            self.v_gh.get().strip(),
+            "--budget",
+            "25",
+            "--reflection_mode",
+            self.v_reflection_mode.get().strip(),
+            "--reasoning_effort",
+            self.v_reasoning_effort.get().strip(),
         ]
+        if self.v_ground_provider.get().strip() == "doubao_ark":
+            cmd.extend(["--ground_coord_scale", "1000"])
 
         self.process = subprocess.Popen(
-            cmd, env=env,
+            cmd,
+            env=env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace",
+            text=True,
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
         )
 
@@ -523,15 +641,19 @@ class Launcher:
         if self.v_ground_provider.get().strip() == "doubao_ark":
             ground_model = ground_model or self.v_model_id.get().strip()
             ground_key = self.v_model_key.get().strip()
-        save_config({
-            "model_api_key":  self.v_model_key.get().strip(),
-            "model_id":       self.v_model_id.get().strip(),
-            "model_url":      DEFAULT_CONFIG["model_url"],
-            "ground_provider": self.v_ground_provider.get().strip(),
-            "ground_api_key": ground_key,
-            "ground_url":     self._ground_url(),
-            "ground_model":   ground_model,
-        })
+        save_config(
+            {
+                "model_api_key": self.v_model_key.get().strip(),
+                "model_id": self.v_model_id.get().strip(),
+                "model_url": DEFAULT_CONFIG["model_url"],
+                "ground_provider": self.v_ground_provider.get().strip(),
+                "ground_api_key": ground_key,
+                "ground_url": self._ground_url(),
+                "ground_model": ground_model,
+                "reflection_mode": self.v_reflection_mode.get().strip(),
+                "reasoning_effort": self.v_reasoning_effort.get().strip(),
+            }
+        )
         self.v_status.set("配置已保存 ✓")
 
     def _on_close(self):

@@ -227,17 +227,59 @@ class OSWorldACI(ACI):
 
     # Given the state and worker's referring expression, use the grounding model to generate (x,y)
     def generate_coords(self, ref_expr: str, obs: Dict) -> List[int]:
+        model_name = self.engine_params_for_grounding.get("model", "").lower()
+        is_doubao = "doubao" in model_name
 
         # Reset the grounding model state
         self.grounding_model.reset()
 
-        # Configure the context, UI-TARS demo does not use system prompt
+        if is_doubao:
+            coord_scale = self.engine_params_for_grounding.get(
+                "ground_coord_scale", 1000
+            )
+            platform_names = {
+                "windows": "Windows",
+                "darwin": "macOS",
+                "linux": "Linux",
+            }
+            platform_name = platform_names.get(self.platform, self.platform)
+            prompt = (
+                f"You are a GUI agent operating on a {platform_name} desktop. "
+                "Given a screenshot, locate the described UI element "
+                "and output the click action with its coordinates.\n\n"
+                "## Action Space\n"
+                "click(point='<point>x y</point>')\n\n"
+                "## Output Format\n"
+                "Thought: ...\n"
+                "Action: click(point='<point>x y</point>')\n\n"
+                "## Rules\n"
+                f"- Coordinates: use 0-{coord_scale} for both axes.\n"
+                "- Locate the center point of the described element.\n"
+                "- End your response with the Action line.\n\n"
+                f"## Element Description\n{ref_expr}"
+            )
+            self.grounding_model.add_message(
+                text_content=prompt,
+                image_content=obs["screenshot"],
+                put_text_last=False,
+            )
+            response = call_llm_safe(self.grounding_model, temperature=0.0, top_p=0.7)
+            print("RAW GROUNDING MODEL RESPONSE:", response)
+
+            point_match = re.search(r"<point>\s*(\d+)\s+(\d+)\s*</point>", response)
+            if point_match:
+                return [int(point_match.group(1)), int(point_match.group(2))]
+
+            numericals = re.findall(r"\d+", response)
+            if len(numericals) >= 2:
+                return [int(numericals[0]), int(numericals[1])]
+            raise ValueError(f"Failed to parse coordinates from response: {response}")
+
         prompt = f"Query:{ref_expr}\nOutput only the coordinate of one point in your response.\n"
         self.grounding_model.add_message(
             text_content=prompt, image_content=obs["screenshot"], put_text_last=True
         )
 
-        # Generate and parse coordinates
         response = call_llm_safe(self.grounding_model)
         print("RAW GROUNDING MODEL RESPONSE:", response)
         numericals = re.findall(r"\d+", response)
@@ -334,9 +376,15 @@ class OSWorldACI(ACI):
 
     # Resize from grounding model dim into OSWorld dim (1920 * 1080)
     def resize_coordinates(self, coordinates: List[int]) -> List[int]:
+        coord_scale = self.engine_params_for_grounding.get("ground_coord_scale")
+        if coord_scale is not None:
+            return [
+                round(coordinates[0] * self.width / coord_scale),
+                round(coordinates[1] * self.height / coord_scale),
+            ]
+
         grounding_width = self.engine_params_for_grounding["grounding_width"]
         grounding_height = self.engine_params_for_grounding["grounding_height"]
-
         return [
             round(coordinates[0] * self.width / grounding_width),
             round(coordinates[1] * self.height / grounding_height),

@@ -5,6 +5,7 @@ import logging
 import os
 import platform
 import pyautogui
+
 pyautogui.FAILSAFE = False
 import signal
 import sys
@@ -84,8 +85,10 @@ def repair_text_mojibake(text: str) -> str:
                 "簡",
             )
         )
-        return good_chars * 3 - bad_markers * 5 + len(
-            value.replace("?", "").replace("�", "").replace("锟", "")
+        return (
+            good_chars * 3
+            - bad_markers * 5
+            + len(value.replace("?", "").replace("�", "").replace("锟", ""))
         )
 
     return max(candidates, key=score)
@@ -264,7 +267,9 @@ def capture_desktop_screenshot():
         try:
             return ImageGrab.grab(all_screens=True)
         except Exception as exc:
-            logger.warning("All-screen capture failed, falling back to pyautogui: %s", exc)
+            logger.warning(
+                "All-screen capture failed, falling back to pyautogui: %s", exc
+            )
     return pyautogui.screenshot()
 
 
@@ -426,6 +431,12 @@ def main():
         required=True,
         help="Height of screenshot image after processor rescaling",
     )
+    parser.add_argument(
+        "--ground_coord_scale",
+        type=int,
+        default=None,
+        help="Coordinate range the grounding model outputs (1000 for Doubao).",
+    )
 
     # AgentS3 specific arguments
     parser.add_argument(
@@ -445,6 +456,20 @@ def main():
         type=int,
         default=25,
         help="Maximum number of steps (default: 25)",
+    )
+    parser.add_argument(
+        "--reflection_mode",
+        type=str,
+        default="on_failure",
+        choices=["full", "reduced", "on_failure", "off"],
+        help="Reflection frequency control",
+    )
+    parser.add_argument(
+        "--reasoning_effort",
+        type=str,
+        default="medium",
+        choices=["low", "medium", "high", "xhigh"],
+        help="Reasoning effort for GPT/o-series models",
     )
 
     args = parser.parse_args()
@@ -487,6 +512,8 @@ def main():
         "base_url": args.model_url,
         "api_key": args.model_api_key,
         "temperature": getattr(args, "model_temperature", None),
+        "reasoning_effort": args.reasoning_effort,
+        "reflection_mode": args.reflection_mode,
     }
 
     # Load the grounding engine from a custom endpoint
@@ -498,6 +525,8 @@ def main():
         "grounding_width": scaled_width,
         "grounding_height": scaled_height,
     }
+    if args.ground_coord_scale is not None:
+        engine_params_for_grounding["ground_coord_scale"] = args.ground_coord_scale
     trace_execution(
         "MODEL_INTERFACE_INIT: "
         + repr(
