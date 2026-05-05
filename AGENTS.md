@@ -9,6 +9,22 @@
 - `Codex`: 负责 `analysis -> plan -> docs -> coding -> testing`
 - `Claude Code`: 负责 review
 
+## Session Startup Check
+
+每个新的 coding session 启动时，必须先执行 agent 启动自检：
+
+```bash
+python -m unittest tests.test_agent_startup -v
+```
+
+自检通过（13 tests OK）才允许进入 coding。如果自检失败，先修复再继续。
+
+启动自检覆盖：
+- Feishu domain layer 全部模块可导入
+- S3 execution layer 可导入
+- NL → TestCase → WorkflowPlan 核心链路可用
+- 所有已有 feishu 测试通过
+
 当前默认要求：
 
 1. 每次进入模块实现前，先理解模块职责、边界、上下游交互和当前实现现状。
