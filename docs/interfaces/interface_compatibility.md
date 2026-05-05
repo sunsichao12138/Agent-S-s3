@@ -1,192 +1,127 @@
 # 接口兼容性指南
 
-## 快速查询表
+最后更新：2026-05-05
 
-### CLI 参数（向后兼容 ✅）
+## 1. 当前默认入口
+
+当前默认 CLI 入口仍是：
+
+```python
+from gui_agents.s3.agents.grounding import OSWorldACI
+```
+
+对应文件：
+
+- `gui_agents/s3/cli_app.py`
+- `gui_agents/s3/agents/grounding.py`
+
+这意味着当前默认主线是 `vision-first`，调用方只应假设通用动作可用，例如：
+
+- `agent.open(...)`
+- `agent.click(...)`
+- `agent.type(...)`
+- `agent.hotkey(...)`
+- `agent.wait(...)`
+
+## 2. Feishu / Windows 专用扩展的当前状态
+
+仓库中仍保留以下 Feishu / Windows 专用实现：
+
+- `gui_agents/s3/agents/grounding_feishu.py`
+- `gui_agents/s3/agents/_feishu_exec.py`
+
+其中定义了额外 helper，例如：
+
+- `feishu_focus()`
+- `feishu_click(...)`
+- `feishu_type(...)`
+- `feishu_doc_click(...)`
+- `feishu_doc_type(...)`
+
+但这些 helper 当前不是默认入口契约。只有在入口显式切到：
+
+```python
+from gui_agents.s3.agents.grounding_feishu import WindowsFeishuACI as OSWorldACI
+```
+
+时，才可以把上述方法当成可用能力。
+
+## 3. 兼容性口径
+
+### CLI 参数
+
+当前默认入口仍需要显式传入 grounding 配置：
 
 ```bash
 python gui_agents/s3/cli_app.py \
   --provider openai \
-  --model <豆包_model_id> \
-  --model_url https://ark.cn-beijing.volces.com/api/v3 \
-  --model_api_key <YOUR_KEY> \
-  --ground_provider doubao_ark \
-  --ground_url https://ark.cn-beijing.volces.com/api/v3 \
-  --ground_api_key <YOUR_KEY> \
-  --ground_model doubao-seed-1-6-vision-250815 \
+  --model <main_model_id> \
+  --model_url <main_model_url> \
+  --model_api_key <main_model_key> \
+  --ground_provider <ground_provider> \
+  --ground_url <ground_model_url> \
+  --ground_api_key <ground_model_key> \
+  --ground_model <ground_model_id> \
   --grounding_width 1000 \
-  --grounding_height 1000 \
-  --budget 25
+  --grounding_height 1000
 ```
 
-**变化:**
-- `--ground_provider` 新增 `doubao_ark` 选项（兼容 `open_router`, `openai`）
-- `--ground_model` 默认改为豆包（兼容旧值）
-- `--grounding_width/height` 改为固定 1000×1000（自动）
+说明：
 
----
+- `--grounding_width` / `--grounding_height` 仍是当前入口要求的必填参数
+- `--budget` 当前默认值以 `cli_app.py` 为准，不应再沿用旧文档里的历史数值
+- 若某个 launcher 对这些参数做了包装或覆写，应以 launcher 实际实现为准
 
-### Python API（部分破坏性 ⚠️）
+### Python API
 
-#### 旧代码
+默认主线写法：
+
 ```python
 from gui_agents.s3.agents.grounding import OSWorldACI
+
 agent = OSWorldACI(...)
-agent.click("按钮")
+agent.click("发送按钮")
+agent.type("hello")
 ```
 
-#### 新代码
+可选扩展写法：
+
 ```python
 from gui_agents.s3.agents.grounding_feishu import WindowsFeishuACI as OSWorldACI
+
 agent = OSWorldACI(...)
-agent.click("按钮")  # 兼容
-agent.feishu_click("飞书按钮")  # 新增
+agent.feishu_click("飞书按钮")
 ```
 
-**关键变化:**
-- ✅ `cli_app.py` 自动处理了切换，用户代码无需改动
-- ⚠️ 若直接 `import OSWorldACI`，需改为 `import WindowsFeishuACI`
-- ✅ 所有旧方法保留（`click`, `type`, `hotkey` 等）
-- ✨ 新增 5 个飞书方法（见下表）
+约束：
 
----
+- 不要把可选扩展写成默认兼容事实
+- 如果某段文档或 prompt 使用了 `feishu_*` 方法，必须先确认当前入口是否真的接入 `WindowsFeishuACI`
 
-### Agent 动作方法
+## 4. 浏览器态与桌面态的使用边界
 
-#### 新增方法（仅 Windows）
+若后续重新启用 Feishu / Windows 专用 helper，推荐口径如下：
 
-| 方法 | 签名 | 返回值 | 使用场景 |
-|------|------|--------|---------|
-| `feishu_focus()` | `-> str` | 可 exec 代码 | 启动任务前，确保窗口在前台 |
-| `feishu_click(text, num_clicks, button)` | `(str, int, str) -> str` | 可 exec 代码 | 飞书桌面端 UI 点击（UIA） |
-| `feishu_type(text, element, overwrite, enter)` | `(str, str?, bool, bool) -> str` | 可 exec 代码 | 输入框/消息 |
-| `feishu_doc_click(button_name)` | `(str) -> str` | 可 exec 代码 | 云文档工具栏按钮 |
-| `feishu_doc_type(text)` | `(str) -> str` | 可 exec 代码 | 云文档分享弹窗输入 |
+1. 飞书桌面端原生控件：`feishu_click` / `feishu_type`
+2. 浏览器云文档顶部工具栏：`feishu_doc_click`
+3. 浏览器正文和页面内容：`agent.click` / `agent.type`
+4. 浏览器分享弹窗已自动聚焦输入框：`feishu_doc_type`
 
-#### 旧方法（兼容 ✅）
+在默认入口未接线前，上述规则只能视为历史/可选路线，不能当成当前主线承诺。
 
-```python
-agent.click("描述")          # ✅ 仍可用（视觉定位）
-agent.type(text, "描述")     # ✅ 仍可用
-agent.hotkey(['ctrl', 'a'])  # ✅ 仍可用
-agent.wait(1.0)              # ✅ 仍可用
-```
+## 5. 迁移检查清单
 
----
+- [ ] 若文档写了“`cli_app.py` 已自动切到 `WindowsFeishuACI`”，请删除或改正
+- [ ] 若调用方直接使用 `agent.feishu_click(...)`，先确认入口是否已切到 `grounding_feishu.py`
+- [ ] 若需求只是恢复当前可跑基线，优先使用默认 `OSWorldACI` 主线，不要先碰 UIA / Accessibility
+- [ ] 若要恢复 UIA 路线，先更新 `spec`、`interfaces`、freeze 记录，再改入口
 
-### Procedural Memory（规则更新）
+## 6. 历史说明
 
-#### 旧规则
-```python
-# 不推荐
-agent.feishu_doc_send()  # ❌ 已删除
-agent.click("发送")       # ⚠️ 不稳定（豆包模型前）
-```
+旧版兼容性文档里关于以下表述已不再代表当前默认主线：
 
-#### 新规则 (#17 step e)
-```python
-# 新建议
-agent.click("发送 button")   # ✅ 豆包模型现在可靠
-```
+- “`cli_app.py` 自动处理了切换”
+- “用户代码默认应改为 `WindowsFeishuACI`”
+- “Feishu UIA helper 已在默认入口生效”
 
-**完整规则见:** `gui_agents/s3/memory/procedural_memory.py` 行 #12–#27
-
----
-
-## 迁移检查清单
-
-### 如果你的代码用过...
-
-- [ ] `from gui_agents.s3.agents.grounding import OSWorldACI`
-  → 改为 `from gui_agents.s3.agents.grounding_feishu import WindowsFeishuACI as OSWorldACI`
-
-- [ ] `agent.feishu_doc_send()`
-  → 改为 `agent.click("发送 button")`
-
-- [ ] OpenRouter 硬编码
-  → 改为豆包（见上面的 CLI 参数表）
-
-- [ ] 旧 procedural_memory 规则（#17 e 段）
-  → 自动更新，无需改动
-
----
-
-## 问题排查
-
-### 豆包模型返回 "array index out of bounds"
-→ 确保 `--grounding_width 1000 --grounding_height 1000`（必需）
-
-### feishu_click() 找不到元素
-→ 元素必须在 UIA 树中可见
-  - 检查: `element.window_text()` 返回正确的中文
-  - 若在浏览器，改用 `feishu_doc_click()` 或 `agent.click()`
-
-### Windows 多显示器坐标错误
-→ 检查 `virtual_screen_left/top`（自动检测）
-  - 若显示器位置特殊，可手动调整 `grounding_feishu.py` line 43-45
-
-### SOP 执行失败
-→ 检查 `sops/*.json` 格式
-  → 参数用 `{{name}}` 语法填充（见 `sops/飞书发消息.json` 示例）
-
----
-
-## 贡献指南
-
-### 添加新 Feishu 动作
-
-```python
-# grounding_feishu.py
-
-@agent_action
-def my_feishu_action(self, param: str):
-    """简述功能"""
-    return build_my_feishu_action_code(param)
-
-# _feishu_exec.py
-
-def build_my_feishu_action_code(param: str) -> str:
-    """返回 exec() 可执行的代码串"""
-    return f"""
-import ctypes
-import time
-# ... 你的代码 ...
-print("MY_ACTION_RESULT:", {param!r})
-"""
-```
-
-**关键点:**
-- 返回的字符串必须能被 `exec()` 执行
-- 包含完整的 import（包括 `ctypes`, `time`, `pyautogui` 等）
-- 用 f-string 注入参数（参数化）
-- 末尾用 `print()` 输出结果供 logging
-
-### 添加新 SOP 模板
-
-```json
-{
-  "name": "我的工作流",
-  "description": "简述",
-  "params": [
-    {"name": "target", "label": "目标", "placeholder": "例如：小李", "optional": false}
-  ],
-  "steps": [
-    {"type": "hotkey", "keys": ["ctrl", "alt", "f"], "comment": "唤起搜索"},
-    {"type": "type", "text": "{{target}}"},
-    {"type": "press", "key": "enter"}
-  ]
-}
-```
-
-**支持的 step 类型:**
-- `hotkey` — 快捷键
-- `type` — 键盘输入
-- `press` — 单键
-- `wait` — 延迟
-- `click` — 点击 (x, y)
-- `http` — API 调用
-- `ai_click` — 图像匹配点击
-
----
-
-**最后更新:** 2026-05-04
+这些内容如需保留，应按历史决策或历史迁移说明处理，不应继续作为当前实现事实。

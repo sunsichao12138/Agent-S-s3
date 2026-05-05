@@ -243,9 +243,9 @@ class BaseLocator:
 
 实现类型：
 
-- `VisionLocator`
-- `AccessibilityLocator`
-- `HybridLocator`
+- `VisionLocator`：当前默认运行链路
+- `AccessibilityLocator`：仅保留接口占位，当前默认入口不启用
+- `HybridLocator`：仅保留接口占位，当前默认入口不启用
 
 ## 8. FeishuACI Interface
 
@@ -259,6 +259,13 @@ class FeishuACI:
     def send_message(self): ...
     def recover_from_modal_or_wrong_page(self): ...
 ```
+
+当前里程碑说明：
+
+- `FeishuACI` 是语义动作抽象，不要求当前代码已经完整实现上述专用方法
+- 当前默认入口 `gui_agents/s3/cli_app.py` 使用的是 `gui_agents/s3/agents/grounding.py` 中的 `OSWorldACI`
+- 因此默认主线只应假设通用动作存在，例如 `open`、`click`、`type`、`hotkey`、`wait`
+- 若后续恢复或重新接线 Feishu / Windows 专用 helper（含 UIA 路线），应视为可选扩展，不得默认写成已接入事实，除非入口与调用链已同步更新
 
 ## 9. FeishuWorker Interface
 

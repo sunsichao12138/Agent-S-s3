@@ -271,16 +271,32 @@ run_testcase(testcase)
 - visual anchors
 - relative bounds
 
+当前里程碑口径：
+
+- 默认运行链路只承诺 `VisionLocator`
+- 默认入口按 `gui_agents/s3/cli_app.py -> gui_agents/s3/agents/grounding.py -> OSWorldACI` 运行
+- Windows + 飞书场景下，先保证 vision-first 路线可跑，再讨论其他定位通道恢复
+
 ### 7.2 Accessibility Locator
 
-当前阶段可不实现，但必须保留接口，用于未来接入：
+当前阶段仅保留接口，不进入默认运行链路。原因是 Windows + 飞书桌面端 / 浏览器混合场景下，可访问性与 UIA 路线兼容性尚未稳定。
+
+未来接入方向：
 
 - Electron Accessibility Tree
 - 原生可访问性信息
 
+约束：
+
+- 当前 milestone 不要求实现
+- 当前 milestone 不要求默认入口启用
+- 若后续恢复该路线，必须先更新 `interfaces` 与 freeze 记录，再进入并行 coding
+
 ### 7.3 Hybrid Locator
 
-融合：
+当前阶段只保留设计占位，不作为默认实现承诺。
+
+未来融合方向：
 
 - 视觉候选
 - Accessibility 候选
@@ -360,7 +376,7 @@ artifacts/
 | `planner/` | workflow 选择、业务参数绑定 | `TestCase` | 与 `detectors/`、`pages/` 并行，但先冻结输入输出 |
 | `pages/` | `PageDescriptor`、页面元数据 | 无 | 可与 `detectors/` 并行 |
 | `detectors/` | `FeishuState` | `pages/` | 可与 `locators/` 并行 |
-| `locators/` | 统一定位结果 | `pages/`、`FeishuState` | 先实现 `VisionLocator`，其余保留接口 |
+| `locators/` | 统一定位结果 | `pages/`、`FeishuState` | 当前只承诺 `VisionLocator` 进入默认链路；`AccessibilityLocator` / `HybridLocator` 仅保留接口 |
 | `agents/` | `FeishuACI`、`FeishuWorker`、运行时调度 | `planner/`、`locators/`、`detectors/`、`verifiers/` | 尽量串行，属于高耦合层 |
 | `workflows/` | 显式阶段机、fallback、retry | `planner/`、`agents/` | 可按单 workflow 分模块并行 |
 | `verifiers/` | step/case 验证结果 | `detectors/`、`workflows/` | 可与 `reports/` 并行 |
