@@ -237,7 +237,9 @@ class OSWorldACI(ACI):
             # Doubao-Seed-1.6-vision official grounding format (per volcengine docs).
             # The model outputs coordinates in 0-1000 normalized space regardless of
             # image dimensions. temp=0, top_p=0.7 for deterministic output.
-            coord_scale = self.engine_params_for_grounding.get("ground_coord_scale", 1000)
+            coord_scale = self.engine_params_for_grounding.get(
+                "ground_coord_scale", 1000
+            )
             platform_names = {"windows": "Windows", "darwin": "macOS", "linux": "Linux"}
             platform_name = platform_names.get(self.platform, self.platform)
             prompt = (
@@ -257,16 +259,16 @@ class OSWorldACI(ACI):
                 f"## Element Description\n{ref_expr}"
             )
             self.grounding_model.add_message(
-                text_content=prompt, image_content=obs["screenshot"], put_text_last=False
+                text_content=prompt,
+                image_content=obs["screenshot"],
+                put_text_last=False,
             )
             # Official recommended params: temperature=0, top_p=0.7
             response = call_llm_safe(self.grounding_model, temperature=0.0, top_p=0.7)
             print("RAW GROUNDING MODEL RESPONSE:", response)
 
             # Parse Doubao's <point>x y</point> format
-            point_match = re.search(
-                r"<point>\s*(\d+)\s+(\d+)\s*</point>", response
-            )
+            point_match = re.search(r"<point>\s*(\d+)\s+(\d+)\s*</point>", response)
             if point_match:
                 return [int(point_match.group(1)), int(point_match.group(2))]
 
