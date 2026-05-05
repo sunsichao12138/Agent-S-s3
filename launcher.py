@@ -167,13 +167,34 @@ def _sync_flat_fields(cfg: dict):
 
 def _apply_env_defaults(cfg: dict, had_main_routing: bool):
     env = _parse_env_txt(ENV_FILE)
-    ark_key = env.get("ARK_API_KEY") or env.get("api-key", "")
+    main_ark_key = (
+        env.get("VOLCANO_API_KEY")
+        or env.get("ARK_MAIN_API_KEY")
+        or env.get("api-key", "")
+        or env.get("ARK_API_KEY", "")
+    )
+    main_endpoint_id = (
+        env.get("VOLCANO_ENDPOINT_ID")
+        or env.get("ARK_MAIN_ENDPOINT_ID")
+        or env.get("ep-id", "")
+    )
+    ground_ark_key = (
+        env.get("ARK_API_KEY") or env.get("GROUND_API_KEY") or main_ark_key
+    )
 
     volcano_cfg = cfg["main_providers"]["volcano"]
-    if ark_key and not volcano_cfg["model_api_key"]:
-        volcano_cfg["model_api_key"] = ark_key
-    if env.get("ep-id") and not volcano_cfg["model_id"]:
-        volcano_cfg["model_id"] = env["ep-id"]
+    current_volcano_key = volcano_cfg.get("model_api_key", "")
+    should_repair_legacy_fallback = (
+        current_volcano_key
+        and env.get("api-key")
+        and env.get("ARK_API_KEY")
+        and current_volcano_key == env.get("ARK_API_KEY")
+        and env.get("api-key") != env.get("ARK_API_KEY")
+    )
+    if main_ark_key and (not current_volcano_key or should_repair_legacy_fallback):
+        volcano_cfg["model_api_key"] = main_ark_key
+    if main_endpoint_id and not volcano_cfg["model_id"]:
+        volcano_cfg["model_id"] = main_endpoint_id
 
     gpt_cfg = cfg["main_providers"]["openai_gpt"]
     if env.get("oai_api") and not gpt_cfg["model_api_key"]:
@@ -190,8 +211,8 @@ def _apply_env_defaults(cfg: dict, had_main_routing: bool):
         gpt_cfg["model_id"] = env["model"]
 
     doubao_ground = cfg["ground_providers"]["doubao_ark"]
-    if ark_key and not doubao_ground["api_key"]:
-        doubao_ground["api_key"] = ark_key
+    if ground_ark_key and not doubao_ground["api_key"]:
+        doubao_ground["api_key"] = ground_ark_key
 
     if (
         env.get("model_reasoning_effort")
@@ -304,21 +325,21 @@ def detect_environment() -> dict:
 class Launcher:
     def __init__(self):
         self.colors = {
-            "bg": "#0b1220",
-            "panel": "#121b2d",
-            "panel_alt": "#182338",
-            "border": "#2b3a55",
-            "text": "#edf4ff",
-            "muted": "#9fb0c9",
-            "accent": "#4f8cff",
-            "accent_alt": "#2fc79f",
-            "warn": "#ffb84d",
-            "danger": "#ff6b6b",
-            "success": "#2fc79f",
-            "button_text": "#f8fbff",
-            "input_bg": "#0f1727",
-            "input_text": "#f3f7ff",
-            "log_bg": "#08111d",
+            "bg": "#f5f5f7",
+            "panel": "#ffffff",
+            "panel_alt": "#f0f0f2",
+            "border": "#e0e0e4",
+            "text": "#1d1d1f",
+            "muted": "#86868b",
+            "accent": "#4a6cf7",
+            "accent_alt": "#34c759",
+            "warn": "#ff9f0a",
+            "danger": "#ff3b30",
+            "success": "#34c759",
+            "button_text": "#1d1d1f",
+            "input_bg": "#ffffff",
+            "input_text": "#1d1d1f",
+            "log_bg": "#fafafa",
         }
 
         self.root = tk.Tk()
@@ -432,18 +453,18 @@ class Launcher:
         )
         style.map(
             "Primary.TButton",
-            background=[("active", "#6d9fff"), ("disabled", "#31476f")],
-            foreground=[("disabled", "#9fb0c9")],
+            background=[("active", "#6d88ff"), ("disabled", "#d6defa")],
+            foreground=[("disabled", "#97a3d3")],
         )
         style.map(
             "Subtle.TButton",
-            background=[("active", "#22304a"), ("disabled", self.colors["panel_alt"])],
-            foreground=[("disabled", "#73839b")],
+            background=[("active", "#e5e5ea"), ("disabled", self.colors["panel_alt"])],
+            foreground=[("disabled", "#9a9aa1")],
         )
         style.map(
             "Danger.TButton",
-            background=[("active", "#ff8787"), ("disabled", "#5a313a")],
-            foreground=[("disabled", "#b69499")],
+            background=[("active", "#ff6b60"), ("disabled", "#f7d7d4")],
+            foreground=[("disabled", "#c79c97")],
         )
         style.configure("TNotebook", background=self.colors["bg"], borderwidth=0)
         style.configure(
@@ -455,7 +476,7 @@ class Launcher:
         )
         style.map(
             "TNotebook.Tab",
-            background=[("selected", self.colors["panel_alt"]), ("active", "#213251")],
+            background=[("selected", self.colors["panel_alt"]), ("active", "#e8edf9")],
             foreground=[
                 ("selected", self.colors["text"]),
                 ("active", self.colors["text"]),
@@ -548,7 +569,7 @@ class Launcher:
         self.status_badge = tk.Label(
             hero_actions,
             textvariable=self.v_status,
-            bg="#29425f",
+            bg="#e5e5ea",
             fg=self.colors["button_text"],
             font=("Segoe UI Semibold", 11),
             padx=14,
@@ -836,11 +857,11 @@ class Launcher:
             "<MouseWheel>",
             lambda e: self.log.yview_scroll(-1 * (e.delta // 120), "units"),
         )
-        self.log.tag_config("info", foreground="#7db6ff")
-        self.log.tag_config("action", foreground="#64e3cf")
-        self.log.tag_config("warn", foreground="#ffc86b")
-        self.log.tag_config("query", foreground="#ffe08a")
-        self.log.tag_config("success", foreground="#63e2b8")
+        self.log.tag_config("info", foreground="#4a6cf7")
+        self.log.tag_config("action", foreground="#30b0a0")
+        self.log.tag_config("warn", foreground="#e8a030")
+        self.log.tag_config("query", foreground="#b8a030")
+        self.log.tag_config("success", foreground="#30a050")
         self.log.tag_config("muted", foreground=self.colors["muted"])
         self.log.tag_config("normal", foreground=self.colors["text"])
 
@@ -930,9 +951,9 @@ class Launcher:
             "<MouseWheel>",
             lambda e: self.sop_log.yview_scroll(-1 * (e.delta // 120), "units"),
         )
-        self.sop_log.tag_config("ok", foreground="#63e2b8")
-        self.sop_log.tag_config("err", foreground="#ff8f8f")
-        self.sop_log.tag_config("info", foreground="#7db6ff")
+        self.sop_log.tag_config("ok", foreground="#30a050")
+        self.sop_log.tag_config("err", foreground="#ff3b30")
+        self.sop_log.tag_config("info", foreground="#4a6cf7")
         self._reload_sops()
 
     def _provider_key_from_label(self, table: dict, label: str, default: str) -> str:
@@ -1125,15 +1146,15 @@ class Launcher:
 
     def _set_status(self, status: str, mode: str, detail: str):
         palette = {
-            "idle": "#2c3f5e",
-            "starting": "#36598e",
-            "running": "#1f6b58",
-            "ready": "#23815f",
-            "saved": "#6d5a22",
-            "stopped": "#6d3341",
+            "idle": "#e5e5ea",
+            "starting": "#d6e0fd",
+            "running": "#d1f0dd",
+            "ready": "#c8f0d4",
+            "saved": "#fdf0d1",
+            "stopped": "#fddddd",
         }
         self.status_badge.configure(
-            bg=palette.get(mode, "#2c3f5e"), fg=self.colors["button_text"]
+            bg=palette.get(mode, "#e5e5ea"), fg=self.colors["button_text"]
         )
         self.v_status.set(status)
         self.v_status_detail.set(detail)
