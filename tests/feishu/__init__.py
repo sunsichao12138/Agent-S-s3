@@ -1,0 +1,2 @@
+"""Feishu domain tests."""
+
